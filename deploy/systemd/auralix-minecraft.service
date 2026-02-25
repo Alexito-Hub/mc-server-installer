@@ -1,0 +1,13 @@
+[Unit]
+Description=Auralix Minecraft Server
+After=network.target
+
+[Service]
+User=minecraft
+WorkingDirectory=/opt/auralix/minecraft
+ExecStart=/usr/bin/java -jar server.jar nogui
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,23 @@
+# Auralix .gitignore
+server.jar
+eula.txt
+world/
+world_nether/
+world_the_end/
+logs/
+cache/
+plugins/*.jar
+mods/*.jar
+backups/
+staging/
+*.zip
+*.tar.gz
+BuildTools.jar
+fabric-installer.jar
+bedrock_server
+bedrock-server-*.zip
+__pycache__/
+*.pyc
+.env
+.vscode/
+.idea/
