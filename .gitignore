@@ -1,4 +1,5 @@
-# Auralix .gitignore
+# Project .gitignore
+servers/
 server.jar
 eula.txt
 world/

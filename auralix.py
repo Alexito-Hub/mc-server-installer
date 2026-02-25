@@ -8,13 +8,13 @@
 ╚══════════════════════════════════════════════════════════════════╝
 
 MODO DE USO:
-  sudo python3 auralix.py          →  Asistente completo (recomendado)
-  sudo python3 auralix.py start    →  Iniciar todos los servidores
-  sudo python3 auralix.py stop     →  Detener todos los servidores
-  sudo python3 auralix.py status   →  Ver estado de los servidores
-  sudo python3 auralix.py backup   →  Crear backup
-  sudo python3 auralix.py validate →  Verificar instalación
-  sudo python3 auralix.py logs     →  Ver logs en tiempo real
+    sudo python3 <script>          →  Asistente completo (recomendado)
+    sudo python3 <script> start    →  Iniciar todos los servidores
+    sudo python3 <script> stop     →  Detener todos los servidores
+    sudo python3 <script> status   →  Ver estado de los servidores
+    sudo python3 <script> backup   →  Crear backup
+    sudo python3 <script> validate →  Verificar instalación
+    sudo python3 <script> logs     →  Ver logs en tiempo real
 """
 from __future__ import annotations
 
@@ -40,6 +40,8 @@ import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from urllib.parse import urlparse
+import re
 
 # ═══════════════════════════════════════════════════════════════════
 #  COLORES Y UI
@@ -94,7 +96,48 @@ LOGS    = ROOT / "logs"
 DOCS    = ROOT / "docs"
 SYSTEMD = ROOT / "systemd"
 TESTS   = ROOT / "tests"
-CONFIG  = ROOT / "auralix.json"
+CONFIG  = ROOT / "config.json"
+PROGRESS_FILE = ROOT / "progress.json"
+
+def save_progress(state: dict) -> None:
+    try:
+        PROGRESS_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+        info(f"Progreso guardado: {PROGRESS_FILE}")
+    except Exception as e:
+        warn(f"No se pudo guardar el progreso: {e}")
+
+def load_progress() -> dict | None:
+    try:
+        if PROGRESS_FILE.exists():
+            return json.loads(PROGRESS_FILE.read_text())
+    except Exception as e:
+        warn(f"No se pudo leer el progreso: {e}")
+    return None
+
+def clear_progress() -> None:
+    try:
+        if PROGRESS_FILE.exists():
+            PROGRESS_FILE.unlink()
+            info("Progreso previo eliminado.")
+    except Exception as e:
+        warn(f"No se pudo eliminar el progreso: {e}")
+
+def validate_state(state: dict) -> tuple[bool, list[str]]:
+    """Validación mínima del estado guardado. Devuelve (ok, mensajes)."""
+    msgs = []
+    # server_name
+    if state.get("server_name") is None or not str(state.get("server_name")).strip():
+        msgs.append("Nombre de servidor vacío")
+    # java_instances ports
+    for i, inst in enumerate(state.get("java_instances", [])):
+        port = inst.get("port")
+        if not isinstance(port, int) or not (1 <= port <= 65535):
+            msgs.append(f"Puerto inválido en java_instances[{i}]: {port}")
+    for i, inst in enumerate(state.get("bedrock_instances", [])):
+        port = inst.get("port")
+        if not isinstance(port, int) or not (1 <= port <= 65535):
+            msgs.append(f"Puerto inválido en bedrock_instances[{i}]: {port}")
+    return (len(msgs) == 0, msgs)
 
 # ═══════════════════════════════════════════════════════════════════
 #  PLUGINS Y MODS CONOCIDOS
@@ -121,12 +164,12 @@ MODS = {
 #  UTILIDADES DE RED
 # ═══════════════════════════════════════════════════════════════════
 def get_json(url: str, timeout: int = 20) -> dict:
-    req = Request(url, headers={"User-Agent": "Auralix/3.0"})
+    req = Request(url, headers={"User-Agent": "Installer/3.0"})
     with urlopen(req, timeout=timeout) as r:
         return json.load(r)
 
 def download(url: str, dest: Path) -> None:
-    req = Request(url, headers={"User-Agent": "Auralix/3.0"})
+    req = Request(url, headers={"User-Agent": "Installer/3.0"})
     try:
         with urlopen(req, timeout=120) as r:
             total = int(r.headers.get("Content-Length", 0))
@@ -148,7 +191,47 @@ def download(url: str, dest: Path) -> None:
         if total and _color():
             print()
     except (HTTPError, URLError) as e:
-        raise SystemExit(f"Error de descarga ({url}): {e}")
+        # Raise a regular exception so callers can handle download failures
+        raise RuntimeError(f"Error de descarga ({url}): {e}")
+
+
+def resolve_github_latest_asset(original_url: str, name_prefix: str | None = None) -> str | None:
+    try:
+        p = urlparse(original_url)
+        parts = p.path.split("/")
+        # Expecting ['', 'owner', 'repo', 'releases', 'download', 'tag', 'file']
+        if len(parts) < 5:
+            return None
+        owner = parts[1]
+        repo  = parts[2]
+        # Infer prefix from provided name_prefix or from file name
+        if not name_prefix:
+            if parts[-1]:
+                name_prefix = parts[-1].split("-")[0]
+            else:
+                name_prefix = repo
+
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/releases"
+        releases = get_json(api_url)
+        # releases is expected to be a list; traverse newest first
+        for rel in releases:
+            assets = rel.get("assets", [])
+            for a in assets:
+                aname = a.get("name", "")
+                if not aname:
+                    continue
+                # match prefix and .jar extension
+                if aname.lower().startswith(name_prefix.lower()) and aname.lower().endswith(".jar"):
+                    return a.get("browser_download_url")
+        # Fallback: query /latest
+        latest = get_json(f"https://api.github.com/repos/{owner}/{repo}/releases/latest")
+        for a in latest.get("assets", []):
+            aname = a.get("name", "")
+            if aname.lower().startswith(name_prefix.lower()) and aname.lower().endswith(".jar"):
+                return a.get("browser_download_url")
+    except Exception:
+        return None
+    return None
 
 def hash_file(path: Path, algo: str = "sha256") -> str:
     h = hashlib.new(algo)
@@ -161,7 +244,7 @@ def get_public_ip() -> str:
     """Obtiene la IP pública del servidor."""
     for url in ("https://api4.ipify.org", "https://ifconfig.me/ip", "https://icanhazip.com"):
         try:
-            req = Request(url, headers={"User-Agent": "Auralix/3.0"})
+            req = Request(url, headers={"User-Agent": "Installer/3.0"})
             with urlopen(req, timeout=5) as r:
                 return r.read().decode().strip()
         except Exception:
@@ -235,7 +318,7 @@ def create_system_user(username: str) -> bool:
         subprocess.check_call([
             "useradd", "--system", "--no-create-home",
             "--shell", "/usr/sbin/nologin",
-            "--comment", "Auralix Minecraft Server",
+            "--comment", "Minecraft Server",
             username
         ], stderr=subprocess.DEVNULL)
         ok(f"Usuario del sistema '{username}' creado.")
@@ -465,14 +548,14 @@ def verify_jar(result: dict) -> bool:
 #  GENERACIÓN DE ARCHIVOS
 # ═══════════════════════════════════════════════════════════════════
 def write_eula(dest: Path) -> None:
-    dest.write_text("eula=true\n# EULA aceptado por Auralix Installer\n", encoding="utf-8")
+    dest.write_text("eula=true\n# EULA aceptado por el instalador\n", encoding="utf-8")
 
 def write_server_properties(dest: Path, cfg: dict) -> None:
     bind_ip = cfg.get("bind_ip", "")   # "" = bind en todas las interfaces
     lines = [
-        "# ── Auralix Server Properties ──",
-        f"server-name={cfg.get('name', 'Auralix')}",
-        f"motd={cfg.get('motd', '§bAuralix §7| §aServidor Minecraft')}",
+        "# ── Server Properties ──",
+        f"server-name={cfg.get('name', 'Servidor')}",
+        f"motd={cfg.get('motd', '§bServidor §7| §aMinecraft')}",
         f"server-ip={bind_ip}",
         f"server-port={cfg.get('port', 25565)}",
         f"online-mode={str(cfg.get('online_mode', True)).lower()}",
@@ -501,7 +584,7 @@ def write_start_script(dest_dir: Path, jar: str, jvm_flags: str,
                        server_name: str = "server") -> None:
     sh = textwrap.dedent(f"""\
         #!/usr/bin/env bash
-        # ── Auralix Start Script ──
+        # ── Start Script ──
         # Servidor: {server_name}
         set -euo pipefail
         cd "$(dirname "$(realpath "$0")")"
@@ -514,7 +597,7 @@ def write_start_script(dest_dir: Path, jar: str, jvm_flags: str,
             exit 1
         fi
 
-        echo "[Auralix] Iniciando {server_name}..."
+        echo "Iniciando {server_name}..."
         exec java $FLAGS -jar "$JAR" nogui
     """)
     script = dest_dir / "start.sh"
@@ -524,7 +607,7 @@ def write_start_script(dest_dir: Path, jar: str, jvm_flags: str,
 def write_bedrock_start(dest_dir: Path) -> None:
     sh = textwrap.dedent("""\
         #!/usr/bin/env bash
-        # ── Auralix Bedrock Start ──
+        # ── Bedrock Start ──
         set -euo pipefail
         cd "$(dirname "$(realpath "$0")")"
         if [ -f "bedrock_server" ]; then
@@ -541,9 +624,9 @@ def write_bedrock_start(dest_dir: Path) -> None:
 
 def write_systemd_unit(unit_path: Path, server_dir: Path,
                         start_sh: Path, username: str,
-                        description: str = "Auralix Minecraft Server") -> None:
+                        description: str = "Minecraft Server") -> None:
     content = textwrap.dedent(f"""\
-        # ── Generado por Auralix v3.0 ──
+        # ── Generado por el instalador v3.0 ──
         [Unit]
         Description={description}
         After=network-online.target
@@ -582,10 +665,10 @@ def write_systemd_unit(unit_path: Path, server_dir: Path,
     unit_path.write_text(content, encoding="utf-8")
 
 def write_screen_launcher(dest: Path, servers: list[tuple[str, Path]]) -> None:
-    lines = ["#!/usr/bin/env bash", "# ── Auralix Screen Launcher ──", ""]
+    lines = ["#!/usr/bin/env bash", "# ── Screen Launcher ──", ""]
     for name, sh in servers:
         safe = name.replace(" ", "_").lower()
-        lines.append(f'echo "[Auralix] Iniciando {name} en sesión screen: {safe}"')
+        lines.append(f'echo "Iniciando {name} en sesión screen: {safe}"')
         lines.append(f'screen -dmS "{safe}" bash "{sh}"')
         lines.append(f'echo "  → screen -r {safe}  (para conectarte)"')
         lines.append("")
@@ -595,10 +678,10 @@ def write_screen_launcher(dest: Path, servers: list[tuple[str, Path]]) -> None:
     dest.chmod(0o755)
 
 def write_tmux_launcher(dest: Path, servers: list[tuple[str, Path]]) -> None:
-    lines = ["#!/usr/bin/env bash", "# ── Auralix tmux Launcher ──", ""]
+    lines = ["#!/usr/bin/env bash", "# ── tmux Launcher ──", ""]
     for name, sh in servers:
         safe = name.replace(" ", "_").lower()
-        lines.append(f'echo "[Auralix] Iniciando {name} en sesión tmux: {safe}"')
+        lines.append(f'echo "Iniciando {name} en sesión tmux: {safe}"')
         lines.append(f'tmux new-session -d -s "{safe}" "bash {sh}"')
         lines.append(f'echo "  → tmux attach -t {safe}  (para conectarte)"')
         lines.append("")
@@ -617,7 +700,7 @@ def write_docker_compose(dest: Path, services: list[dict]) -> None:
         svc_block.append(textwrap.dedent(f"""\
           {name}:
             build: {path}
-            container_name: auralix_{name}
+            container_name: mc_{name}
             ports:
               - "{port}:{port}/{proto}"
             volumes:
@@ -652,13 +735,13 @@ def write_backup_script(dest: Path, server_dirs: list[Path]) -> None:
     paths_str = " \\\n  ".join(f'"{p}"' for p in server_dirs)
     sh = textwrap.dedent(f"""\
         #!/usr/bin/env bash
-        # ── Auralix Backup Script ──
+        # ── Backup Script ──
         set -euo pipefail
         TS=$(date +%Y%m%d_%H%M%S)
         DEST="{BACKUPS}"
         mkdir -p "$DEST"
 
-        echo "[Auralix Backup] Iniciando backup $TS..."
+        echo "Iniciando backup $TS..."
         tar -czf "$DEST/backup_$TS.tar.gz" \\
           {paths_str}
 
@@ -674,7 +757,7 @@ def write_backup_script(dest: Path, server_dirs: list[Path]) -> None:
 
 def write_gitignore(dest: Path) -> None:
     dest.write_text(textwrap.dedent("""\
-        # Auralix .gitignore
+        # .gitignore
         server.jar
         eula.txt
         world/
@@ -700,14 +783,14 @@ def write_gitignore(dest: Path) -> None:
     """), encoding="utf-8")
 
 def write_readme(dest: Path, cfg: dict) -> None:
-    name     = cfg.get("server_name", "Auralix")
+    name     = cfg.get("server_name", "Servidor")
     public   = cfg.get("public_ip", "?")
     domain   = cfg.get("domain", "")
     ip_str   = domain if domain else public
     dest.write_text(textwrap.dedent(f"""\
         # {name} — Servidor Minecraft
 
-        Configurado y gestionado con **Auralix v3.0**.
+        Configurado y gestionado por el instalador v3.0.
 
         ## Conexión al servidor
 
@@ -718,13 +801,13 @@ def write_readme(dest: Path, cfg: dict) -> None:
         ## Comandos
 
         ```bash
-        sudo python3 auralix.py          # Asistente / reconfigurar
-        sudo python3 auralix.py start    # Iniciar servidores
-        sudo python3 auralix.py stop     # Detener servidores
-        sudo python3 auralix.py status   # Estado
-        sudo python3 auralix.py backup   # Backup
-        sudo python3 auralix.py logs     # Ver logs
-        sudo python3 auralix.py validate # Validar instalación
+        sudo python3 <script>          # Asistente / reconfigurar
+        sudo python3 <script> start    # Iniciar servidores
+        sudo python3 <script> stop     # Detener servidores
+        sudo python3 <script> status   # Estado
+        sudo python3 <script> backup   # Backup
+        sudo python3 <script> logs     # Ver logs
+        sudo python3 <script> validate # Validar instalación
         ```
 
         ## Estructura
@@ -812,7 +895,22 @@ def install_plugins(plugins_dir: Path, urls: dict[str, str]) -> None:
             download(url, dest)
             ok(name)
         except Exception as e:
-            warn(f"Plugin '{name}' falló: {e}")
+            # Intentar fallback si es un release de GitHub (URL de releases/download)
+            fallback_tried = False
+            if "github.com" in str(url) or name.lower().startswith("viav"):
+                try:
+                    info(f"Intentando resolver última release de GitHub para: {name}")
+                    new_url = resolve_github_latest_asset(str(url), name_prefix=name)
+                    if new_url:
+                        fallback_tried = True
+                        info(f"Descargando versión más reciente desde: {new_url}")
+                        download(new_url, dest)
+                        ok(f"{name} (latest)")
+                except Exception as e2:
+                    warn(f"Fallback GitHub para '{name}' falló: {e2}")
+
+            if not fallback_tried or not dest.exists():
+                warn(f"Plugin '{name}' falló: {e}")
 
 # ═══════════════════════════════════════════════════════════════════
 #  CONFIGURACIÓN DE IP / DOMINIO
@@ -908,11 +1006,33 @@ def configure_network(port: int, protocol: str = "tcp") -> dict:
 # ═══════════════════════════════════════════════════════════════════
 def run_wizard() -> int:
     banner()
-    title("Bienvenido al asistente de configuración de Auralix v3.0")
+    title("Bienvenido al asistente de configuración v3.0")
     print("  Este asistente configura todo lo necesario para que tu servidor")
     print("  Minecraft quede corriendo en Linux de forma permanente.")
     print(f"  {C.DIM}Presiona Enter para aceptar el valor entre [corchetes].{C.RESET}\n" if _color()
           else "  Presiona Enter para el valor por defecto.\n")
+
+    # Cargar progreso previo si existe
+    prev = load_progress()
+    resume_state = None
+    completed: set[str] = set()
+    if prev:
+        if ask_yn("Se encontró una configuración previa. ¿Deseas reanudarla?", True):
+            ok("Reanudando configuración previa.")
+            resume_state = prev.get("data", {})
+            completed = set(prev.get("completed", []))
+            # validar
+            valid, msgs = validate_state(resume_state)
+            if not valid:
+                warn("La configuración guardada tiene problemas:")
+                for m in msgs:
+                    warn(" - " + m)
+                if not ask_yn("¿Deseas intentar continuar con la configuración guardada de todos modos?", False):
+                    clear_progress()
+                    resume_state = None
+                    completed = set()
+        else:
+            clear_progress()
 
     if not is_root():
         warn("No estás ejecutando como root (sudo). Algunas funciones estarán limitadas:")
@@ -922,7 +1042,7 @@ def run_wizard() -> int:
         print()
         confirm = ask_yn("¿Continuar sin root?", True)
         if not confirm:
-            info("Ejecuta con: sudo python3 auralix.py")
+            info("Ejecuta con: sudo python3 <script>")
             return 1
 
     # ── JAVA CHECK ────────────────────────────────────────────────
@@ -941,17 +1061,45 @@ def run_wizard() -> int:
         else:
             err("Instala Java manualmente: sudo apt install openjdk-21-jre-headless")
 
+    # marcar progreso
+    state = resume_state or {}
+    state.setdefault("completed", [])
+    if "java_check" not in state["completed"]:
+        state["completed"].append("java_check")
+        state["data"] = state.get("data", {})
+        save_progress({"completed": state["completed"], "data": state["data"]})
+
     # ── NOMBRE Y DATOS BÁSICOS ────────────────────────────────────
     step("Datos básicos del servidor")
-    server_name = ask("Nombre del servidor", "Auralix")
-    motd        = ask("MOTD (mensaje en la lista)", f"§b{server_name} §7» §aOnline")
+    if resume_state and "basic" in completed:
+        server_name = resume_state.get("server_name", "Servidor")
+        motd = resume_state.get("motd", f"§b{server_name} §7» §aOnline")
+        ok(f"Usando valores guardados: server_name={server_name}")
+    else:
+        server_name = ask("Nombre del servidor", "Servidor")
+        motd        = ask("MOTD (mensaje en la lista)", f"§b{server_name} §7» §aOnline")
+        # guardar
+        state = state if 'state' in locals() else {"completed": [], "data": {}}
+        state["data"]["server_name"] = server_name
+        state["data"]["motd"] = motd
+        if "basic" not in state["completed"]:
+            state["completed"].append("basic")
+        save_progress({"completed": state["completed"], "data": state["data"]})
 
     # ── TIPO DE SERVIDOR ──────────────────────────────────────────
     step("¿Qué tipo de servidor quieres instalar?")
     print(f"  {C.CYAN}java{C.RESET}    → Java Edition (PC, Mac, Linux)" if _color() else "  java    → Java Edition")
     print(f"  {C.CYAN}bedrock{C.RESET} → Bedrock Edition (Windows 10, móvil, consolas)" if _color() else "  bedrock → Bedrock Edition")
     print(f"  {C.CYAN}ambos{C.RESET}   → Ambas ediciones\n" if _color() else "  ambos   → Ambas ediciones\n")
-    server_type = ask_choice("Tipo", ["java", "bedrock", "ambos"], "java")
+    if resume_state and "server_type" in completed:
+        server_type = resume_state.get("server_type", "java")
+        ok(f"Usando tipo guardado: {server_type}")
+    else:
+        server_type = ask_choice("Tipo", ["java", "bedrock", "ambos"], "java")
+        state["data"]["server_type"] = server_type
+        if "server_type" not in state["completed"]:
+            state["completed"].append("server_type")
+        save_progress({"completed": state["completed"], "data": state["data"]})
     do_java    = server_type in ("java", "ambos")
     do_bedrock = server_type in ("bedrock", "ambos")
 
@@ -962,7 +1110,15 @@ def run_wizard() -> int:
     print(f"  {C.BOLD}online-mode=false{C.RESET} → Cualquier jugador puede entrar (cuentas no-premium / cracked)" if _color()
           else "  online-mode=false → Cuentas no-premium / cracked")
     print()
-    online_mode = ask_yn("¿Requerir cuenta Minecraft original (online-mode)?", False)
+    if resume_state and "auth_mode" in completed:
+        online_mode = resume_state.get("online_mode", False)
+        ok(f"Usando online_mode guardado: {online_mode}")
+    else:
+        online_mode = ask_yn("¿Requerir cuenta Minecraft original (online-mode)?", False)
+        state["data"]["online_mode"] = online_mode
+        if "auth_mode" not in state["completed"]:
+            state["completed"].append("auth_mode")
+        save_progress({"completed": state["completed"], "data": state["data"]})
     if not online_mode:
         warn("online-mode=false: cualquier jugador puede entrar sin verificación.")
         warn("Recomendado instalar AuthMe o similar para seguridad.")
@@ -972,15 +1128,19 @@ def run_wizard() -> int:
     # ── INSTANCIAS JAVA ───────────────────────────────────────────
     java_instances: list[dict] = []
     if do_java:
-        step("Configuración Java Edition")
-        n = ask_int("¿Cuántas instancias Java quieres?", 1, 1, 10)
+        if resume_state and "java_instances" in completed:
+            java_instances = resume_state.get("java_instances", [])
+            ok(f"Usando {len(java_instances)} instancias Java guardadas.")
+        else:
+            step("Configuración Java Edition")
+            n = ask_int("¿Cuántas instancias Java quieres?", 1, 1, 10)
 
-        for i in range(n):
-            print()
-            print(f"  {C.BOLD}── Instancia Java #{i+1} ──{C.RESET}" if _color()
-                  else f"  -- Instancia Java #{i+1} --")
-            print()
-            print("  Motores disponibles:")
+            for i in range(n):
+                print()
+                print(f"  {C.BOLD}── Instancia Java #{i+1} ──{C.RESET}" if _color()
+                    else f"  -- Instancia Java #{i+1} --")
+                print()
+                print("  Motores disponibles:")
             engines = {
                 "paper":   "Alto rendimiento, compatible con plugins Bukkit/Spigot (recomendado)",
                 "purpur":  "Fork de Paper con opciones extra de configuración",
@@ -1020,75 +1180,99 @@ def run_wizard() -> int:
                 "online_mode": online_mode,
                 "name": server_name, "motd": motd,
             })
+            # guardar instancias java
+            state["data"]["java_instances"] = java_instances
+            if "java_instances" not in state["completed"]:
+                state["completed"].append("java_instances")
+            save_progress({"completed": state["completed"], "data": state["data"]})
 
     # ── INSTANCIAS BEDROCK ────────────────────────────────────────
     bedrock_instances: list[dict] = []
     if do_bedrock:
-        step("Configuración Bedrock Edition")
-        n = ask_int("¿Cuántas instancias Bedrock?", 1, 1, 5)
-        for i in range(n):
-            print(f"\n  {C.BOLD}── Instancia Bedrock #{i+1} ──{C.RESET}" if _color()
-                  else f"\n  -- Bedrock #{i+1} --")
-            bver = ask("Versión Bedrock (o 'latest')", "latest")
-            net  = configure_network(19132 + i, "udp")
-            bedrock_instances.append({"version": bver, "net": net})
+        if resume_state and "bedrock_instances" in completed:
+            bedrock_instances = resume_state.get("bedrock_instances", [])
+            ok(f"Usando {len(bedrock_instances)} instancias Bedrock guardadas.")
+        else:
+            step("Configuración Bedrock Edition")
+            n = ask_int("¿Cuántas instancias Bedrock?", 1, 1, 5)
+            for i in range(n):
+                print(f"\n  {C.BOLD}── Instancia Bedrock #{i+1} ──{C.RESET}" if _color()
+                      else f"\n  -- Bedrock #{i+1} --")
+                bver = ask("Versión Bedrock (o 'latest')", "latest")
+                net  = configure_network(19132 + i, "udp")
+                bedrock_instances.append({"version": bver, "net": net})
+            state["data"]["bedrock_instances"] = bedrock_instances
+            if "bedrock_instances" not in state["completed"]:
+                state["completed"].append("bedrock_instances")
+            save_progress({"completed": state["completed"], "data": state["data"]})
 
     # ── PLUGINS / MODS ────────────────────────────────────────────
     selected_plugins: dict[str, str] = {}
     selected_mods:    dict[str, str] = {}
     if do_java:
-        step("Plugins y Mods")
+        if resume_state and "plugins_mods" in completed:
+            selected_plugins = resume_state.get("plugins", {})
+            selected_mods = resume_state.get("mods", {})
+            ok(f"Usando plugins/mods guardados: {', '.join(selected_plugins.keys())}")
+        else:
+            step("Plugins y Mods")
 
-        # Auto-agregar ViaVersion si online_mode es False (para que conecten varias versiones)
-        multiversion = ask_yn("¿Permitir que se conecten jugadores de distintas versiones de Minecraft?", False)
-        if multiversion:
-            selected_plugins["ViaVersion"]   = PLUGINS["ViaVersion"]
-            selected_plugins["ViaBackwards"] = PLUGINS["ViaBackwards"]
-            ok("ViaVersion + ViaBackwards añadidos (soporte multi-versión).")
+            # Auto-agregar ViaVersion si online_mode es False (para que conecten varias versiones)
+            multiversion = ask_yn("¿Permitir que se conecten jugadores de distintas versiones de Minecraft?", False)
+            if multiversion:
+                selected_plugins["ViaVersion"]   = PLUGINS["ViaVersion"]
+                selected_plugins["ViaBackwards"] = PLUGINS["ViaBackwards"]
+                ok("ViaVersion + ViaBackwards añadidos (soporte multi-versión).")
 
-        # Si offline, sugerir AuthMe
-        if not online_mode:
-            add_authme = ask_yn("¿Instalar plugin de login/registro (AuthMe) para cuentas no-premium?", True)
-            if add_authme:
-                selected_plugins["AuthMe"] = (
-                    "https://github.com/AuthMe/AuthMeReloaded/releases/download/5.6.0/AuthMe-5.6.0.jar"
-                )
-                ok("AuthMe añadido para gestión de cuentas no-premium.")
+            # Si offline, sugerir AuthMe
+            if not online_mode:
+                add_authme = ask_yn("¿Instalar plugin de login/registro (AuthMe) para cuentas no-premium?", True)
+                if add_authme:
+                    selected_plugins["AuthMe"] = (
+                        "https://github.com/AuthMe/AuthMeReloaded/releases/download/5.6.0/AuthMe-5.6.0.jar"
+                    )
+                    ok("AuthMe añadido para gestión de cuentas no-premium.")
 
-        use_plugins = ask_yn("¿Instalar plugins adicionales?", False)
-        if use_plugins:
-            print()
-            print("  Plugins disponibles:")
-            for name in PLUGINS:
-                print(f"  {C.CYAN}  {name}{C.RESET}" if _color() else f"    {name}")
-            print()
-            defaults = ask_yn("¿Instalar paquete básico? (LuckPerms + EssentialsX + Vault)", True)
-            if defaults:
-                for p in ("LuckPerms", "EssentialsX", "Vault"):
-                    selected_plugins[p] = PLUGINS[p]
-            else:
-                names = ask_list(f"Nombres separados por comas ({', '.join(PLUGINS.keys())})")
-                for n in names:
-                    match = next((k for k in PLUGINS if k.lower() == n.lower()), None)
-                    if match:
-                        selected_plugins[match] = PLUGINS[match]
-                    else:
-                        warn(f"Plugin '{n}' no reconocido.")
+            use_plugins = ask_yn("¿Instalar plugins adicionales?", False)
+            if use_plugins:
+                print()
+                print("  Plugins disponibles:")
+                for name in PLUGINS:
+                    print(f"  {C.CYAN}  {name}{C.RESET}" if _color() else f"    {name}")
+                print()
+                defaults = ask_yn("¿Instalar paquete básico? (LuckPerms + EssentialsX + Vault)", True)
+                if defaults:
+                    for p in ("LuckPerms", "EssentialsX", "Vault"):
+                        selected_plugins[p] = PLUGINS[p]
+                else:
+                    names = ask_list(f"Nombres separados por comas ({', '.join(PLUGINS.keys())})")
+                    for n in names:
+                        match = next((k for k in PLUGINS if k.lower() == n.lower()), None)
+                        if match:
+                            selected_plugins[match] = PLUGINS[match]
+                        else:
+                            warn(f"Plugin '{n}' no reconocido.")
 
-            extra_urls = ask_list("URLs adicionales de plugins (vacío para omitir)")
-            for url in extra_urls:
-                name = url.split("/")[-1].replace(".jar", "")
-                selected_plugins[name] = url
+                extra_urls = ask_list("URLs adicionales de plugins (vacío para omitir)")
+                for url in extra_urls:
+                    name = url.split("/")[-1].replace(".jar", "")
+                    selected_plugins[name] = url
 
-        fabric_inst = [i for i in java_instances if i["engine"] == "fabric"]
-        if fabric_inst:
-            use_mods = ask_yn("¿Instalar mods de rendimiento para Fabric? (Lithium + FerriteCore)", True)
-            if use_mods:
-                selected_mods.update({"Lithium": MODS["Lithium"], "FerriteCore": MODS["FerriteCore"]})
-            extra_mod_urls = ask_list("URLs adicionales de mods (vacío para omitir)")
-            for url in extra_mod_urls:
-                name = url.split("/")[-1].replace(".jar", "")
-                selected_mods[name] = url
+            fabric_inst = [i for i in java_instances if i["engine"] == "fabric"]
+            if fabric_inst:
+                use_mods = ask_yn("¿Instalar mods de rendimiento para Fabric? (Lithium + FerriteCore)", True)
+                if use_mods:
+                    selected_mods.update({"Lithium": MODS["Lithium"], "FerriteCore": MODS["FerriteCore"]})
+                extra_mod_urls = ask_list("URLs adicionales de mods (vacío para omitir)")
+                for url in extra_mod_urls:
+                    name = url.split("/")[-1].replace(".jar", "")
+                    selected_mods[name] = url
+        # guardar plugins/mods
+        state["data"]["plugins"] = selected_plugins
+        state["data"]["mods"] = selected_mods
+        if "plugins_mods" not in state["completed"]:
+            state["completed"].append("plugins_mods")
+        save_progress({"completed": state["completed"], "data": state["data"]})
 
     # ── PERSISTENCIA ─────────────────────────────────────────────
     step("Persistencia — ¿Cómo debe mantenerse corriendo el servidor?")
@@ -1108,21 +1292,40 @@ def run_wizard() -> int:
 
     # Recomendar screen si no hay root
     default_persist = "systemd" if is_root() else "screen"
-    persistence = ask_choice("Modo", list(persist_opts.keys()), default_persist)
-
-    system_user = "minecraft"
-    if persistence == "systemd" and is_root():
-        system_user = ask("Usuario del sistema para el servicio", "minecraft")
-        if not user_exists(system_user):
-            create_system_user(system_user)
+    if resume_state and "persistence" in completed:
+        persistence = resume_state.get("persistence", default_persist)
+        system_user = resume_state.get("system_user", "minecraft")
+        ok(f"Usando persistencia guardada: {persistence}")
+    else:
+        persistence = ask_choice("Modo", list(persist_opts.keys()), default_persist)
+        system_user = "minecraft"
+        if persistence == "systemd" and is_root():
+            system_user = ask("Usuario del sistema para el servicio", "minecraft")
+            if not user_exists(system_user):
+                create_system_user(system_user)
+        state["data"]["persistence"] = persistence
+        state["data"]["system_user"] = system_user
+        if "persistence" not in state["completed"]:
+            state["completed"].append("persistence")
+        save_progress({"completed": state["completed"], "data": state["data"]})
 
     # ── BACKUPS ───────────────────────────────────────────────────
     step("Backups automáticos")
-    do_backups = ask_yn("¿Generar script de backup?", True)
-    if do_backups and persistence == "systemd" and is_root():
-        setup_cron = ask_yn("¿Programar backup diario automático con cron?", True)
+    if resume_state and "backups" in completed:
+        do_backups = resume_state.get("do_backups", True)
+        setup_cron = resume_state.get("setup_cron", False)
+        ok(f"Usando configuración de backups guardada: do_backups={do_backups}")
     else:
-        setup_cron = False
+        do_backups = ask_yn("¿Generar script de backup?", True)
+        if do_backups and persistence == "systemd" and is_root():
+            setup_cron = ask_yn("¿Programar backup diario automático con cron?", True)
+        else:
+            setup_cron = False
+        state["data"]["do_backups"] = do_backups
+        state["data"]["setup_cron"] = setup_cron
+        if "backups" not in state["completed"]:
+            state["completed"].append("backups")
+        save_progress({"completed": state["completed"], "data": state["data"]})
 
     # ── RESUMEN ANTES DE INSTALAR ─────────────────────────────────
     step("Resumen de configuración")
@@ -1145,6 +1348,13 @@ def run_wizard() -> int:
     ok(f"Persistencia: {persistence}")
     ok(f"Backups: {'si' if do_backups else 'no'}")
     print()
+    # marcar resumen completado y guardar estado
+    state["data"]["plugins_list"] = list(selected_plugins.keys())
+    state["data"]["mods_list"] = list(selected_mods.keys())
+    if "summary" not in state["completed"]:
+        state["completed"].append("summary")
+    save_progress({"completed": state["completed"], "data": state["data"]})
+
     if not ask_yn("¿Confirmar e iniciar instalación?", True):
         warn("Instalación cancelada.")
         return 1
@@ -1224,11 +1434,12 @@ def run_wizard() -> int:
         if is_root() and persistence == "systemd":
             set_directory_permissions(td, system_user)
 
-        # systemd unit
-        unit_name = f"auralix-{label}.service"
-        unit_path = SYSTEMD / unit_name
-        write_systemd_unit(unit_path, td, td / "start.sh", system_user,
-                           description=f"Auralix — {label}")
+        # systemd unit (only generate if user chose systemd persistence)
+        if persistence == "systemd":
+            unit_name = f"{label}.service"
+            unit_path = SYSTEMD / unit_name
+            write_systemd_unit(unit_path, td, td / "start.sh", system_user,
+                               description=f"{label}")
 
         # Docker
         if persistence == "docker":
@@ -1237,7 +1448,8 @@ def run_wizard() -> int:
                                      "path": str(td), "proto": "tcp"})
 
         start_scripts.append((label, td / "start.sh"))
-        systemd_units.append(unit_path)
+        if persistence == "systemd":
+            systemd_units.append(unit_path)
         installed_java.append(td)
         ok(f"Java #{i} listo en: {td}")
 
@@ -1258,10 +1470,10 @@ def run_wizard() -> int:
 
         if is_root() and persistence == "systemd":
             set_directory_permissions(td, system_user)
-            unit_name = f"auralix-bedrock-{i}.service"
+            unit_name = f"bedrock-{i}.service"
             unit_path = SYSTEMD / unit_name
             write_systemd_unit(unit_path, td, td / "start.sh", system_user,
-                               description=f"Auralix — Bedrock #{i}")
+                               description=f"Bedrock #{i}")
             systemd_units.append(unit_path)
 
         if persistence == "docker":
@@ -1279,8 +1491,8 @@ def run_wizard() -> int:
         write_backup_script(ROOT / "backup.sh", all_installed)
         ok("backup.sh generado.")
         if setup_cron and is_root():
-            cron_line = f"0 3 * * * root /usr/bin/python3 {ROOT}/auralix.py backup >> {LOGS}/backup.log 2>&1"
-            cron_file = Path("/etc/cron.d/auralix-backup")
+            cron_line = f"0 3 * * * root /usr/bin/python3 {ROOT}/<script> backup >> {LOGS}/backup.log 2>&1"
+            cron_file = Path("/etc/cron.d/minecraft-backup")
             try:
                 cron_file.write_text(cron_line + "\n")
                 ok(f"Cron diario instalado: {cron_file} (a las 3:00 AM)")
@@ -1390,7 +1602,12 @@ def run_wizard() -> int:
         "mods":     list(selected_mods.keys()),
     }
     CONFIG.write_text(json.dumps(config, indent=2, ensure_ascii=False))
-    ok("Configuración guardada en auralix.json")
+    ok("Configuración guardada en config.json")
+    # Instalación completada: eliminar progreso guardado
+    try:
+        clear_progress()
+    except Exception:
+        pass
 
     # ── TEST STUB ─────────────────────────────────────────────────
     test_file = TESTS / "test_installer.py"
@@ -1399,13 +1616,13 @@ def run_wizard() -> int:
             import unittest, json
             from pathlib import Path
             ROOT = Path(__file__).resolve().parent.parent
-            class TestAuralix(unittest.TestCase):
+            class TestInstaller(unittest.TestCase):
                 def test_config_exists(self):
-                    self.assertTrue((ROOT / 'auralix.json').exists())
+                    self.assertTrue((ROOT / 'config.json').exists())
                 def test_servers_exist(self):
                     self.assertTrue((ROOT / 'servers').is_dir())
                 def test_config_valid(self):
-                    cfg = json.loads((ROOT / 'auralix.json').read_text())
+                    cfg = json.loads((ROOT / 'config.json').read_text())
                     self.assertIn('server_name', cfg)
             if __name__ == '__main__':
                 unittest.main()
@@ -1430,9 +1647,9 @@ def run_wizard() -> int:
 
     if persistence == "systemd":
         info("Servidores habilitados como servicios del sistema.")
-        info(f"  Estado:   sudo systemctl status auralix-java-paper-1")
-        info(f"  Logs:     sudo journalctl -u auralix-java-paper-1 -f")
-        info(f"  Detener:  sudo systemctl stop auralix-java-paper-1")
+        info(f"  Estado:   sudo systemctl status java-paper-1")
+        info(f"  Logs:     sudo journalctl -u java-paper-1 -f")
+        info(f"  Detener:  sudo systemctl stop java-paper-1")
     elif persistence in ("screen", "tmux"):
         info(f"Servidores lanzados con {persistence}.")
         info(f"  bash launch_all.sh   (relanzar todos)")
@@ -1444,11 +1661,11 @@ def run_wizard() -> int:
 
     print()
     info("Otros comandos:")
-    info("  sudo python3 auralix.py start    → Iniciar todos")
-    info("  sudo python3 auralix.py stop     → Detener todos")
-    info("  sudo python3 auralix.py status   → Ver estado")
-    info("  sudo python3 auralix.py backup   → Crear backup")
-    info("  sudo python3 auralix.py logs     → Ver logs")
+    info("  sudo python3 <script> start    → Iniciar todos")
+    info("  sudo python3 <script> stop     → Detener todos")
+    info("  sudo python3 <script> status   → Ver estado")
+    info("  sudo python3 <script> backup   → Crear backup")
+    info("  sudo python3 <script> logs     → Ver logs")
     print()
     return 0
 
@@ -1463,7 +1680,7 @@ def load_config() -> dict:
 def run_start() -> int:
     cfg = load_config()
     persistence = cfg.get("persistence", "manual")
-    title("Iniciando servidores Auralix")
+    title("Iniciando servidores")
 
     if persistence == "systemd":
         units = list(SYSTEMD.glob("*.service"))
@@ -1500,7 +1717,7 @@ def run_start() -> int:
 def run_stop() -> int:
     cfg = load_config()
     persistence = cfg.get("persistence", "manual")
-    title("Deteniendo servidores Auralix")
+    title("Deteniendo servidores")
 
     if persistence == "systemd":
         units = list(SYSTEMD.glob("*.service"))
@@ -1514,7 +1731,7 @@ def run_stop() -> int:
     elif persistence == "screen":
         result = subprocess.run(["screen", "-ls"], capture_output=True, text=True)
         for line in result.stdout.splitlines():
-            if "mc_" in line or "auralix" in line.lower():
+            if "mc_" in line:
                 name = line.strip().split(".")[1].split("\t")[0] if "." in line else ""
                 if name:
                     subprocess.run(["screen", "-S", name, "-X", "quit"])
@@ -1545,7 +1762,7 @@ def run_stop() -> int:
 def run_status() -> int:
     cfg = load_config()
     persistence = cfg.get("persistence", "manual")
-    title("Estado de servidores Auralix")
+    title("Estado de servidores")
 
     if persistence == "systemd":
         units = list(SYSTEMD.glob("*.service"))
@@ -1601,7 +1818,7 @@ def run_backup() -> int:
 def run_logs() -> int:
     cfg = load_config()
     persistence = cfg.get("persistence", "manual")
-    title("Logs de servidores Auralix")
+    title("Logs de servidores")
 
     if persistence == "systemd":
         units = list(SYSTEMD.glob("*.service"))
@@ -1621,11 +1838,11 @@ def run_logs() -> int:
     return 1
 
 def run_validate() -> int:
-    title("Validando instalación Auralix")
+    title("Validando instalación")
     all_ok = True
     # Archivos requeridos
     required = [
-        (CONFIG, "Configuración (auralix.json)"),
+        (CONFIG, "Configuración (config.json)"),
         (ROOT / ".gitignore", ".gitignore"),
         (ROOT / "README.md", "README.md"),
     ]
@@ -1660,9 +1877,9 @@ def run_validate() -> int:
     title("Sintaxis Python")
     try:
         py_compile.compile(str(Path(__file__)), doraise=True)
-        ok("auralix.py — sintaxis válida")
+        ok("script — sintaxis válida")
     except Exception as e:
-        err(f"auralix.py — error de sintaxis: {e}")
+        err(f"script — error de sintaxis: {e}")
         all_ok = False
 
     print()
@@ -1703,18 +1920,18 @@ def run_validate() -> int:
 # ═══════════════════════════════════════════════════════════════════
 def main():
     p = argparse.ArgumentParser(
-        prog="auralix",
-        description="Auralix v3 — Minecraft Server Manager",
+        prog="script",
+        description="Minecraft Server Manager",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""\
             Ejemplos:
-              sudo python3 auralix.py           # Asistente completo
-              sudo python3 auralix.py start     # Iniciar servidores
-              sudo python3 auralix.py stop      # Detener servidores
-              sudo python3 auralix.py status    # Estado
-              sudo python3 auralix.py backup    # Backup
-              sudo python3 auralix.py logs      # Ver logs
-              sudo python3 auralix.py validate  # Verificar instalación
+              sudo python3 <script>           # Asistente completo
+              sudo python3 <script> start     # Iniciar servidores
+              sudo python3 <script> stop      # Detener servidores
+              sudo python3 <script> status    # Estado
+              sudo python3 <script> backup    # Backup
+              sudo python3 <script> logs      # Ver logs
+              sudo python3 <script> validate  # Verificar instalación
         """)
     )
     sub = p.add_subparsers(dest="cmd")

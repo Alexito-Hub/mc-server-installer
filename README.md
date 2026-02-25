@@ -1,4 +1,4 @@
-Auralix Minecraft — Proyecto inicial
+Minecraft — Proyecto inicial
 
 Este proyecto automatiza la descarga y la configuración inicial de un servidor Minecraft profesional.
 
@@ -28,36 +28,36 @@ python installer.py -e paper -v latest --staging
 Funciones avanzadas añadidas:
 
 - Verificación de integridad (SHA) automática cuando la API proporciona el checksum.
- - Modo `staging`: añade `staging/` y genera `start-staging.sh` para pruebas. Habilítalo con `"staging": true` en `auralix-minecraft.json` o `python installer.py --staging`.
+ - Modo `staging`: añade `staging/` y genera `start-staging.sh` para pruebas. Habilítalo con `"staging": true` en la configuración o `python installer.py --staging`.
 - Scripts de backup: `backup.sh` y `backup.ps1` guardan comprimidos en `backups/`.
 - Dockerfile incluido para ejecutar el servidor en contenedor. Construcción:
 
 ```bash
-docker build -t auralix-minecraft .
-docker run -v $(pwd)/world:/opt/auralix/minecraft/world -p 25565:25565 auralix-minecraft
+docker build -t minecraft-server .
+docker run -v $(pwd)/world:/opt/minecraft/world -p 25565:25565 minecraft-server
 ```
 
-Ejemplo de `auralix-minecraft.json`:
+Ejemplo de archivo de configuración:
 
-Para usar el sistema como único ejecutador, usa `auralix.py` (ubicado en la raíz del proyecto).
+Para usar el sistema como único ejecutador, usa `installer.py` (ubicado en la raíz del proyecto).
 
 Ejemplos:
 
 ```bash
 # Validar todos los archivos y su sintaxis
-python auralix.py validate
+python installer.py validate
 
 # Ejecutar instalador integrado
-python auralix.py install -e paper -v latest --staging
+python installer.py install -e paper -v latest --staging
 
 # Iniciar servidor (usa el script en `bin/` si lo prefieres)
-python auralix.py start
+python installer.py start
 
 # Crear backup (o ejecutar directamente `bin/backup.sh`)
-python auralix.py backup
+python installer.py backup
 
 # Ejecutar tests unitarios
-python auralix.py test
+python installer.py test
 ```
 
 Tests unitarios:
