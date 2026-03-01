@@ -2,9 +2,10 @@ import unittest
 import tempfile
 from pathlib import Path
 import hashlib
+import json
 
-from installer import hash_file, validate_version_string, write_start_scripts
-
+# Import functions from auralix.py
+from auralix import hash_file, validate_state
 
 class InstallerUnitTests(unittest.TestCase):
     def test_hash_file_sha256(self):
@@ -15,18 +16,24 @@ class InstallerUnitTests(unittest.TestCase):
             h = hash_file(p, 'sha256')
             self.assertEqual(h, hashlib.sha256(data).hexdigest())
 
-    def test_validate_version(self):
-        self.assertTrue(validate_version_string('latest'))
-        self.assertTrue(validate_version_string('1.16.5'))
-        self.assertFalse(validate_version_string('1.16.5-beta'))
+    def test_validate_state_ok(self):
+        state = {
+            "server_name": "My Server",
+            "java_instances": [{"port": 25565}],
+            "bedrock_instances": [{"port": 19132}]
+        }
+        ok, msgs = validate_state(state)
+        self.assertTrue(ok)
+        self.assertEqual(len(msgs), 0)
 
-    def test_write_start_scripts(self):
-        with tempfile.TemporaryDirectory() as td:
-            d = Path(td)
-            write_start_scripts('1G', d)
-            self.assertTrue((d / 'start.sh').exists())
-            self.assertTrue((d / 'start.ps1').exists())
-
+    def test_validate_state_fail(self):
+        state = {
+            "server_name": "",
+            "java_instances": [{"port": 999999}],
+        }
+        ok, msgs = validate_state(state)
+        self.assertFalse(ok)
+        self.assertGreater(len(msgs), 0)
 
 if __name__ == '__main__':
     unittest.main()

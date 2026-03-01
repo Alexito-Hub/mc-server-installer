@@ -2,9 +2,10 @@
 # -*- coding: utf-8 -*-
 """
 ╔══════════════════════════════════════════════════════════════════╗
-║                A U R A L I X   v3.0                             ║
-║        Minecraft Server Manager — Un solo ejecutador            ║
-║   Configura, instala y deja corriendo el servidor en Linux      ║
+║                 A U R A L I X   v3.0                             ║
+║         Minecraft Server Manager — Un solo ejecutador            ║
+║    Configura, instala y deja corriendo el servidor en Linux      ║
+║                    Creado por: Alexito-Hub                       ║
 ╚══════════════════════════════════════════════════════════════════╝
 
 MODO DE USO:
@@ -36,6 +37,12 @@ import socket
 import subprocess
 import sys
 import textwrap
+try:
+    import termios
+    import tty
+except ImportError:
+    termios = None
+    tty = None
 import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -67,15 +74,16 @@ def banner():
     art = r"""
     ╔══════════════════════════════════════════════════════════╗
     ║                                                          ║
-    ║    █████╗ ██╗   ██╗██████╗  █████╗ ██╗     ██╗██╗  ██╗ ║
-    ║   ██╔══██╗██║   ██║██╔══██╗██╔══██╗██║     ██║╚██╗██╔╝ ║
-    ║   ███████║██║   ██║██████╔╝███████║██║     ██║ ╚███╔╝  ║
-    ║   ██╔══██║██║   ██║██╔══██╗██╔══██║██║     ██║ ██╔██╗  ║
-    ║   ██║  ██║╚██████╔╝██║  ██║██║  ██║███████╗██║██╔╝ ██╗ ║
-    ║   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝╚═╝  ╚═╝ ║
+    ║     █████╗ ██╗   ██╗██████╗  █████╗ ██╗     ██╗██╗  ██╗  ║
+    ║    ██╔══██╗██║   ██║██╔══██╗██╔══██╗██║     ██║╚██╗██╔╝  ║
+    ║    ███████║██║   ██║██████╔╝███████║██║     ██║ ╚███╔╝   ║
+    ║    ██╔══██║██║   ██║██╔══██╗██╔══██║██║     ██║ ██╔██╗   ║
+    ║    ██║  ██║╚██████╔╝██║  ██║██║  ██║███████╗██║██╔╝ ██╗  ║
+    ║    ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝╚═╝  ╚═╝  ║
     ║                                                          ║
     ║        Minecraft Server Setup Wizard  v3.0               ║
     ║    Configura · Instala · Corre · ¡A jugar!               ║
+    ║                Creado por: Alexito-Hub                   ║
     ╚══════════════════════════════════════════════════════════╝
     """
     if _color():
@@ -102,7 +110,6 @@ PROGRESS_FILE = ROOT / "progress.json"
 def save_progress(state: dict) -> None:
     try:
         PROGRESS_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False))
-        info(f"Progreso guardado: {PROGRESS_FILE}")
     except Exception as e:
         warn(f"No se pudo guardar el progreso: {e}")
 
@@ -143,21 +150,24 @@ def validate_state(state: dict) -> tuple[bool, list[str]]:
 #  PLUGINS Y MODS CONOCIDOS
 # ═══════════════════════════════════════════════════════════════════
 PLUGINS = {
-    "LuckPerms":    "https://download.luckperms.net/1552/bukkit/loader/LuckPerms-Bukkit-5.4.137.jar",
+    "LuckPerms":    "https://github.com/LuckPerms/LuckPerms/releases/download/v5.4.102/LuckPerms-Bukkit-5.4.102.jar",
     "Vault":        "https://github.com/MilkBowl/Vault/releases/download/1.7.3/Vault.jar",
     "EssentialsX":  "https://github.com/EssentialsX/Essentials/releases/download/2.21.0/EssentialsX-2.21.0.jar",
     "EssentialsX-Chat": "https://github.com/EssentialsX/Essentials/releases/download/2.21.0/EssentialsXChat-2.21.0.jar",
     "WorldEdit":    "https://dev.bukkit.org/projects/worldedit/files/latest",
     "WorldGuard":   "https://dev.bukkit.org/projects/worldguard/files/latest",
     "ProtocolLib":  "https://github.com/dmulloy2/ProtocolLib/releases/download/5.3.0/ProtocolLib.jar",
-    "ViaVersion":   "https://github.com/ViaVersion/ViaVersion/releases/download/4.9.4/ViaVersion-4.9.4.jar",
-    "ViaBackwards": "https://github.com/ViaVersion/ViaBackwards/releases/download/4.9.2/ViaBackwards-4.9.2.jar",
+    "ViaVersion":   "https://github.com/ViaVersion/ViaVersion/releases/download/5.0.3/ViaVersion-5.0.3.jar",
+    "ViaBackwards": "https://github.com/ViaVersion/ViaBackwards/releases/download/5.0.2/ViaBackwards-5.0.2.jar",
+    # Geyser + Floodgate: juego cruzado Java <-> Bedrock
+    "Geyser-Spigot": "https://download.geysermc.org/v2/projects/geyser/versions/latest/builds/latest/downloads/spigot",
+    "Floodgate":     "https://download.geysermc.org/v2/projects/floodgate/versions/latest/builds/latest/downloads/spigot",
 }
 
 MODS = {
-    "FabricAPI":   "https://mediafilez.forgecdn.net/files/5736/61/fabric-api-0.108.0+1.21.1.jar",
-    "Lithium":     "https://mediafilez.forgecdn.net/files/5721/37/lithium-fabric-mc1.21.1-0.13.0.jar",
-    "FerriteCore": "https://mediafilez.forgecdn.net/files/5727/63/ferritecore-7.0.0-fabric.jar",
+    "FabricAPI":   "https://github.com/FabricMC/fabric-api/releases/download/0.102.1+1.21.1/fabric-api-0.102.1+1.21.1.jar",
+    "Lithium":     "https://api.modrinth.com/maven/maven/modrinth/lithium/mc1.21.1-0.13.0/lithium-mc1.21.1-0.13.0.jar",
+    "FerriteCore": "https://github.com/malte0811/FerriteCore/releases/download/7.0.0/ferritecore-7.0.0-fabric.jar",
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -191,7 +201,6 @@ def download(url: str, dest: Path) -> None:
         if total and _color():
             print()
     except (HTTPError, URLError) as e:
-        # Raise a regular exception so callers can handle download failures
         raise RuntimeError(f"Error de descarga ({url}): {e}")
 
 
@@ -199,33 +208,19 @@ def resolve_github_latest_asset(original_url: str, name_prefix: str | None = Non
     try:
         p = urlparse(original_url)
         parts = p.path.split("/")
-        # Expecting ['', 'owner', 'repo', 'releases', 'download', 'tag', 'file']
         if len(parts) < 5:
             return None
         owner = parts[1]
         repo  = parts[2]
-        # Infer prefix from provided name_prefix or from file name
         if not name_prefix:
-            if parts[-1]:
-                name_prefix = parts[-1].split("-")[0]
-            else:
-                name_prefix = repo
-
+            name_prefix = parts[-1].split("-")[0] if parts[-1] else repo
         api_url = f"https://api.github.com/repos/{owner}/{repo}/releases"
-        releases = get_json(api_url)
-        # releases is expected to be a list; traverse newest first
-        for rel in releases:
-            assets = rel.get("assets", [])
-            for a in assets:
+        for rel in get_json(api_url):
+            for a in rel.get("assets", []):
                 aname = a.get("name", "")
-                if not aname:
-                    continue
-                # match prefix and .jar extension
                 if aname.lower().startswith(name_prefix.lower()) and aname.lower().endswith(".jar"):
                     return a.get("browser_download_url")
-        # Fallback: query /latest
-        latest = get_json(f"https://api.github.com/repos/{owner}/{repo}/releases/latest")
-        for a in latest.get("assets", []):
+        for a in get_json(f"https://api.github.com/repos/{owner}/{repo}/releases/latest").get("assets", []):
             aname = a.get("name", "")
             if aname.lower().startswith(name_prefix.lower()) and aname.lower().endswith(".jar"):
                 return a.get("browser_download_url")
@@ -278,21 +273,17 @@ def check_port_available(port: int) -> bool:
 #  SISTEMA LINUX — USUARIOS, PERMISOS, FIREWALL
 # ═══════════════════════════════════════════════════════════════════
 def is_root() -> bool:
-    # POSIX systems have geteuid(); on Windows use IsUserAnAdmin via ctypes
     try:
         if hasattr(os, "geteuid"):
             return os.geteuid() == 0
     except Exception:
         pass
-
-    # Windows: attempt to detect administrative privileges
     if os.name == "nt":
         try:
             import ctypes
             return ctypes.windll.shell32.IsUserAnAdmin() != 0
         except Exception:
             return False
-
     return False
 
 def user_exists(username: str) -> bool:
@@ -340,9 +331,22 @@ def set_directory_permissions(path: Path, username: str) -> None:
     except Exception as e:
         warn(f"No se pudieron asignar permisos a {path}: {e}")
 
+def ensure_parents_traversable(server_dir: Path) -> None:
+    """Añade o+x en cada directorio padre para que el usuario del servicio
+    pueda traversar la ruta aunque el directorio raíz sea 700."""
+    current = server_dir.resolve()
+    fs_root = Path("/")
+    while current != fs_root:
+        current = current.parent
+        try:
+            mode = current.stat().st_mode
+            if not (mode & 0o001):
+                current.chmod(mode | 0o001)
+                ok(f"chmod o+x {current}")
+        except Exception as e:
+            warn(f"No se pudo ajustar permisos en {current}: {e}")
+
 def open_firewall_port(port: int, protocol: str = "tcp") -> None:
-    """Abre el puerto en ufw o firewalld si están disponibles."""
-    # Intentar con ufw
     if shutil.which("ufw"):
         try:
             subprocess.check_call(["ufw", "allow", f"{port}/{protocol}"],
@@ -351,26 +355,21 @@ def open_firewall_port(port: int, protocol: str = "tcp") -> None:
             return
         except Exception:
             pass
-    # Intentar con firewall-cmd
     if shutil.which("firewall-cmd"):
         try:
-            subprocess.check_call([
-                "firewall-cmd", "--permanent",
-                f"--add-port={port}/{protocol}"
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.check_call(["firewall-cmd", "--permanent", f"--add-port={port}/{protocol}"],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             subprocess.check_call(["firewall-cmd", "--reload"],
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             ok(f"Puerto {port}/{protocol} abierto en firewalld.")
             return
         except Exception:
             pass
-    # Intentar con iptables directamente
     if shutil.which("iptables"):
         try:
-            subprocess.check_call([
-                "iptables", "-I", "INPUT", "-p", protocol,
-                "--dport", str(port), "-j", "ACCEPT"
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.check_call(["iptables", "-I", "INPUT", "-p", protocol,
+                                   "--dport", str(port), "-j", "ACCEPT"],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             ok(f"Puerto {port}/{protocol} abierto en iptables.")
             return
         except Exception:
@@ -423,13 +422,19 @@ def install_java_if_missing() -> bool:
 # ═══════════════════════════════════════════════════════════════════
 def fetch_papermc(version: str, build: str | None, dest: Path) -> dict:
     base = "https://api.papermc.io/v2/projects/paper"
+    if not version:
+        err("No se ha especificado una versión para Paper.")
+        raise SystemExit("Instalación de Paper abortada.")
     proj = get_json(base)
     if version == "latest":
         version = proj["versions"][-1]
     if version not in proj["versions"]:
         raise SystemExit(f"Paper: versión '{version}' no encontrada.")
-    builds   = get_json(f"{base}/versions/{version}")["builds"]
-    selected = int(build) if build else builds[-1]
+    
+    version_builds = get_json(f"{base}/versions/{version}")
+    builds = version_builds["builds"]
+    selected = int(build) if build and build.isdigit() else builds[-1]
+    
     binfo    = get_json(f"{base}/versions/{version}/builds/{selected}")
     app      = binfo["downloads"]["application"]
     url      = f"{base}/versions/{version}/builds/{selected}/downloads/{app['name']}"
@@ -440,23 +445,20 @@ def fetch_papermc(version: str, build: str | None, dest: Path) -> dict:
             "hash": app.get("sha256"), "algo": "sha256"}
 
 def fetch_purpur(version: str, build: str | None, dest: Path) -> dict:
-    base = "https://api.purpurmc.org/v2/projects/purpur"
+    base = "https://api.purpurmc.org/v2/purpur"
     proj = get_json(base)
     if version == "latest":
         version = proj["versions"][-1]
     if version not in proj["versions"]:
         raise SystemExit(f"Purpur: versión '{version}' no encontrada.")
-    builds   = get_json(f"{base}/versions/{version}")["builds"]
-    selected = build or builds[-1]
-    binfo    = get_json(f"{base}/versions/{version}/builds/{selected}")
-    app      = binfo.get("downloads", {}).get("application", {})
-    name     = app.get("name") or f"purpur-{version}-{selected}.jar"
-    url      = f"{base}/versions/{version}/builds/{selected}/downloads/{name}"
+    builds   = get_json(f"{base}/{version}")["builds"]
+    selected = build or builds["latest"]
+    url      = f"{base}/{version}/{selected}/download"
     jar      = dest / "server.jar"
     info(f"Descargando Purpur {version} (build {selected})...")
     download(url, jar)
     return {"jar": jar, "version": f"{version}-{selected}",
-            "hash": app.get("sha256"), "algo": "sha256" if app.get("sha256") else None}
+            "hash": None, "algo": None}
 
 def fetch_vanilla(version: str, dest: Path) -> dict:
     manifest = get_json("https://launchermeta.mojang.com/mc/game/version_manifest.json")
@@ -489,30 +491,38 @@ def fetch_fabric(version: str, dest: Path) -> dict:
     return {"jar": jar, "version": version, "hash": None, "algo": None,
             "note": "Para instalar: java -jar fabric-installer.jar server"}
 
+def _get_bedrock_versions_data() -> dict:
+    """Obtiene el JSON de versiones de Bedrock desde BDS-Versions (Bedrock-OSS)."""
+    api_url = "https://raw.githubusercontent.com/Bedrock-OSS/BDS-Versions/main/versions.json"
+    return get_json(api_url)
+
 def fetch_bedrock(version: str, dest: Path) -> dict:
-    if version == "latest":
-        # Intentar obtener la versión más reciente
-        try:
-            data = get_json("https://raw.githubusercontent.com/nicklvsa/minecraft-bedrock-server-versions/main/versions.json")
-            version = data.get("latest", "1.21.50.7")
-        except Exception:
-            version = "1.21.50.7"
-    platforms = [("bin-linux", "linux"), ("bin-win", "windows")]
-    for plat, name in platforms:
-        url  = f"https://minecraft.azureedge.net/{plat}/bedrock-server-{version}.zip"
+    try:
+        info("Consultando versiones de Bedrock...")
+        data      = _get_bedrock_versions_data()
+        cdn       = data["cdn_root"]
+        linux_info= data["linux"]
+        stable    = linux_info["stable"]
+        if version in ("latest", ""):
+            version = stable
+        if version not in linux_info.get("versions", [stable]):
+            warn(f"Versión Bedrock '{version}' no encontrada, usando {stable}.")
+            version = stable
+        url      = f"{cdn}/bin-linux/bedrock-server-{version}.zip"
         dest_zip = dest / f"bedrock-server-{version}.zip"
-        try:
-            info(f"Descargando Bedrock {version} ({name})...")
-            download(url, dest_zip)
-            # Descomprimir
-            if shutil.which("unzip"):
-                subprocess.run(["unzip", "-o", str(dest_zip), "-d", str(dest)],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return {"jar": dest_zip, "version": version, "hash": None, "algo": None,
-                    "bedrock_exec": dest / "bedrock_server"}
-        except Exception:
-            continue
-    return {"jar": None, "version": version, "hash": None, "algo": None,
+        info(f"Descargando Bedrock Server {version}...")
+        download(url, dest_zip)
+        if shutil.which("unzip"):
+            subprocess.run(["unzip", "-o", str(dest_zip), "-d", str(dest)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            ok(f"Bedrock {version} descomprimido en {dest}")
+        else:
+            warn("'unzip' no encontrado. Descomprime manualmente el zip.")
+        return {"jar": dest_zip, "version": version, "hash": None, "algo": None,
+                "bedrock_exec": dest / "bedrock_server"}
+    except Exception as e:
+        warn(f"Error descargando Bedrock: {e}")
+    return {"jar": None, "version": "latest", "hash": None, "algo": None,
             "note": (f"Descarga manual requerida:\n"
                      f"  https://www.minecraft.net/en-us/download/server/bedrock\n"
                      f"  Coloca el zip en: {dest}")}
@@ -522,13 +532,18 @@ def get_available_versions(engine: str) -> list[str]:
         if engine == "paper":
             return list(reversed(get_json("https://api.papermc.io/v2/projects/paper")["versions"]))[:12]
         if engine == "purpur":
-            return list(reversed(get_json("https://api.purpurmc.org/v2/projects/purpur")["versions"]))[:12]
+            return list(reversed(get_json("https://api.purpurmc.org/v2/purpur")["versions"]))[:12]
         if engine in ("vanilla", "spigot"):
             data = get_json("https://launchermeta.mojang.com/mc/game/version_manifest.json")
             return [v["id"] for v in data["versions"] if v["type"] == "release"][:12]
         if engine == "fabric":
             data = get_json("https://meta.fabricmc.net/v2/versions/game")
             return [v["version"] for v in data if v.get("stable")][:12]
+        if engine == "bedrock":
+            bdata    = _get_bedrock_versions_data()
+            stable   = bdata["linux"]["stable"]
+            versions = [v for v in reversed(bdata["linux"]["versions"]) if v != stable][:9]
+            return [f"latest ({stable})"] + versions
     except Exception:
         pass
     return ["latest"]
@@ -624,15 +639,111 @@ def write_bedrock_start(dest_dir: Path) -> None:
 
 def write_systemd_unit(unit_path: Path, server_dir: Path,
                         start_sh: Path, username: str,
-                        description: str = "Minecraft Server") -> None:
+                        description: str = "Minecraft Server",
+                        opts: dict | None = None) -> None:
+    """Genera la unit de systemd con soporte completo de opciones Linux.
+    
+    opts puede contener:
+      restart, restart_sec, timeout_stop, start_limit_burst,
+      start_limit_interval, kill_signal, memory_max, cpu_quota,
+      tasks_max, nice, io_class, io_prio, oom_score, hardening,
+      env_vars (dict str->str), success_exit
+    """
+    o = opts or {}
+
+    # ── Restart ──────────────────────────────────────────────────────────────────
+    restart          = o.get("restart",           "on-failure")
+    restart_sec      = o.get("restart_sec",        15)
+    timeout_stop     = o.get("timeout_stop",       60)
+    start_limit_b    = o.get("start_limit_burst",  5)
+    start_limit_i    = o.get("start_limit_interval", 120)
+    kill_signal      = o.get("kill_signal",        "SIGTERM")
+
+    # ── Recursos ──────────────────────────────────────────────────────────────────
+    memory_max  = o.get("memory_max",  "")    # ej: "4G", "" = sin límite
+    cpu_quota   = o.get("cpu_quota",   "")    # ej: "200%" (2 núcleos)
+    tasks_max   = o.get("tasks_max",   "")    # ej: "512"
+    nice        = o.get("nice",        0)     # -20 (alta) a 19 (baja)
+    io_class    = o.get("io_class",    "")    # best-effort / realtime / idle
+    io_prio     = o.get("io_prio",     "")    # 0-7
+    oom_score   = o.get("oom_score",   "")    # -1000-1000
+
+    # ── Hardening ─────────────────────────────────────────────────────────────────
+    hardening = o.get("hardening", "basic")  # none / basic / strict
+
+    under_home   = str(server_dir.resolve()).startswith("/home")
+    protect_home = "no" if under_home else "read-only"
+
+    if hardening == "none":
+        hardening_block = "# Hardening desactivado\n"
+    elif hardening == "strict":
+        hardening_block = textwrap.dedent(f"""\
+            # Hardening estricto
+            NoNewPrivileges=true
+            PrivateTmp=true
+            PrivateDevices=true
+            ProtectSystem=strict
+            ProtectHome={protect_home}
+            ReadWritePaths={server_dir}
+            ProtectKernelTunables=true
+            ProtectKernelModules=true
+            ProtectKernelLogs=true
+            ProtectControlGroups=true
+            ProtectClock=true
+            ProtectHostname=true
+            RestrictNamespaces=true
+            RestrictRealtime=true
+            RestrictSUIDSGID=true
+            LockPersonality=true
+            MemoryDenyWriteExecute=false
+            SystemCallFilter=@system-service
+            SystemCallErrorNumber=EPERM
+            CapabilityBoundingSet=
+        """)
+    else:  # basic
+        hardening_block = textwrap.dedent(f"""\
+            # Hardening básico
+            NoNewPrivileges=true
+            PrivateTmp=true
+            ProtectSystem=full
+            ProtectHome={protect_home}
+            ReadWritePaths={server_dir}
+        """)
+
+    # ── Variables de entorno ──────────────────────────────────────────────────────────
+    env_vars: dict = o.get("env_vars", {})
+    env_block = ""
+    if env_vars:
+        env_block = "\n".join(f'Environment="{k}={v}"' for k, v in env_vars.items()) + "\n"
+
+    # ── Recursos opcionales (solo si tienen valor) ──────────────────────────────
+    res_lines = []
+    if memory_max:  res_lines.append(f"MemoryMax={memory_max}")
+    if cpu_quota:   res_lines.append(f"CPUQuota={cpu_quota}")
+    if tasks_max:   res_lines.append(f"TasksMax={tasks_max}")
+    if nice != 0:   res_lines.append(f"Nice={nice}")
+    if io_class:    res_lines.append(f"IOSchedulingClass={io_class}")
+    if io_prio:     res_lines.append(f"IOSchedulingPriority={io_prio}")
+    if oom_score:   res_lines.append(f"OOMScoreAdjust={oom_score}")
+    res_block = ("# Límites de recursos\n" + "\n".join(res_lines) + "\n") if res_lines else ""
+
+    success_exit = o.get("success_exit", "")
+    success_line = f"SuccessExitStatus={success_exit}\n" if success_exit else ""
+
+    # Asegurar que start.sh sea ejecutable antes de escribir la unit
+    try:
+        start_sh.chmod(0o755)
+    except Exception:
+        pass
+
     content = textwrap.dedent(f"""\
         # ── Generado por el instalador v3.0 ──
         [Unit]
         Description={description}
         After=network-online.target
         Wants=network-online.target
-        StartLimitIntervalSec=60
-        StartLimitBurst=3
+        StartLimitIntervalSec={start_limit_i}
+        StartLimitBurst={start_limit_b}
 
         [Service]
         Type=simple
@@ -641,18 +752,15 @@ def write_systemd_unit(unit_path: Path, server_dir: Path,
         WorkingDirectory={server_dir}
         ExecStart=/bin/bash {start_sh}
         ExecReload=/bin/kill -HUP $MAINPID
-        Restart=on-failure
-        RestartSec=15s
+        Restart={restart}
+        RestartSec={restart_sec}s
         KillMode=mixed
-        KillSignal=SIGTERM
-        TimeoutStopSec=30
-
-        # Hardening básico
-        NoNewPrivileges=true
-        PrivateTmp=true
-        ProtectSystem=full
-        ProtectHome=read-only
-
+        KillSignal={kill_signal}
+        TimeoutStopSec={timeout_stop}
+        {success_line}\
+        {env_block}\
+        {res_block}\
+        {hardening_block}\
         # Logs
         StandardOutput=journal
         StandardError=journal
@@ -661,8 +769,181 @@ def write_systemd_unit(unit_path: Path, server_dir: Path,
         [Install]
         WantedBy=multi-user.target
     """)
+    # Limpiar líneas vacías duplicadas que puedan generarse
+    import io
+    lines = content.splitlines()
+    clean: list[str] = []
+    prev_blank = False
+    for ln in lines:
+        is_blank = ln.strip() == ""
+        if is_blank and prev_blank:
+            continue
+        clean.append(ln)
+        prev_blank = is_blank
+    content = "\n".join(clean) + "\n"
+
     unit_path.parent.mkdir(parents=True, exist_ok=True)
     unit_path.write_text(content, encoding="utf-8")
+
+
+def configure_systemd_options() -> dict:
+    """Asistente interactivo para opciones avanzadas de systemd/Linux."""
+    step("Opciones avanzadas de systemd")
+    opts: dict = {}
+
+    sep()
+    info("RESTART")
+    opts["restart"]              = ask_choice("Política de reinicio", ["on-failure", "always", "on-abnormal", "on-watchdog", "no"], "on-failure")
+    opts["restart_sec"]          = ask_int("Segundos entre reinicios", 15, 1, 300)
+    opts["start_limit_burst"]    = ask_int("Máx. reinicios en la ventana", 5, 1, 20)
+    opts["start_limit_interval"] = ask_int("Ventana de tiempo (segundos)", 120, 10, 3600)
+    opts["timeout_stop"]         = ask_int("Tiempo para parada ordenada (segundos)", 60, 5, 600)
+    opts["kill_signal"]          = ask_choice("Señal de parada", ["SIGTERM", "SIGINT", "SIGHUP", "SIGKILL"], "SIGTERM")
+
+    sep()
+    info("RECURSOS")
+    if ask_yn("¿Limitar RAM máxima del servicio?", False):
+        opts["memory_max"] = ask("Límite de RAM (ej: 4G, 2048M)", "4G")
+    if ask_yn("¿Limitar el uso de CPU?", False):
+        opts["cpu_quota"] = ask("Cuota de CPU (ej: 200% = 2 núcleos)", "200%")
+    if ask_yn("¿Limitar el número máximo de hilos/procesos?", False):
+        opts["tasks_max"] = ask("Máximo de tareas", "512")
+    opts["nice"] = ask_int("Prioridad nice (-20=alta, 0=normal, 19=baja)", 0, -20, 19)
+    if ask_yn("¿Configurar prioridad de I/O?", False):
+        opts["io_class"] = ask_choice("Clase de I/O", ["best-effort", "realtime", "idle"], "best-effort")
+        opts["io_prio"]  = str(ask_int("Prioridad I/O (0=alta, 7=baja)", 4, 0, 7))
+    if ask_yn("¿Ajustar puntuación OOM?", False):
+        opts["oom_score"] = str(ask_int("OOM score (-1000=nunca matar, 1000=matar primero)", 0, -1000, 1000))
+
+    sep()
+    info("SEGURIDAD  —  none: sin restricciones  |  basic: PrivateTmp+ProtectSystem  |  strict: sandbox completo")
+    opts["hardening"] = ask_choice("Nivel de hardening", ["none", "basic", "strict"], "basic")
+
+    sep()
+    info("ENTORNO")
+    env_vars: dict = {}
+    if ask_yn("¿Añadir variables de entorno al servicio?", False):
+        info("Introduce pares CLAVE=VALOR, línea vacía para terminar.")
+        while True:
+            try:
+                pair = input("    VAR=valor: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                break
+            if not pair:
+                break
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                env_vars[k.strip()] = v.strip()
+            else:
+                warn(f"Formato inválido '{pair}', usa CLAVE=valor")
+    opts["env_vars"] = env_vars
+
+    sep()
+    info("OTROS")
+    if ask_yn("¿Definir códigos de salida exitosos (SuccessExitStatus)?", False):
+        opts["success_exit"] = ask("Códigos (ej: 0 143)", "0 143")
+
+    return opts
+
+def repair_systemd_units() -> int:
+    """Regenera las units systemd generadas por este instalador corrigiendo
+    problemas de permisos (ProtectHome, ReadWritePaths, chmod start.sh)."""
+    if not is_root():
+        err("Necesitas ejecutar como root: sudo python3 auralix.py repair")
+        return 1
+
+    sys_dir = Path("/etc/systemd/system")
+    marker  = "# ── Generado por el instalador v3.0 ──"
+    repaired = 0
+
+    # Buscar en el directorio local de units y en /etc/systemd/system
+    candidates: list[Path] = []
+    for d in (SYSTEMD, sys_dir):
+        if d.exists():
+            candidates += [f for f in d.glob("*.service") if marker in f.read_text(encoding="utf-8", errors="ignore")]
+
+    # Deduplicar por nombre
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for c in candidates:
+        if c.name not in seen:
+            seen.add(c.name)
+            unique.append(c)
+
+    if not unique:
+        warn("No se encontraron units generadas por este instalador.")
+        return 0
+
+    step(f"Reparando {len(unique)} unit(s) systemd...")
+
+    for unit_file in unique:
+        content = unit_file.read_text(encoding="utf-8", errors="ignore")
+
+        # Extraer campos necesarios
+        exec_match = re.search(r'^ExecStart=/bin/bash (.+)$', content, re.MULTILINE)
+        user_match  = re.search(r'^User=(.+)$', content, re.MULTILINE)
+        desc_match  = re.search(r'^Description=(.+)$', content, re.MULTILINE)
+
+        if not exec_match or not user_match:
+            warn(f"No se pudo parsear {unit_file.name}, omitiendo.")
+            continue
+
+        start_sh   = Path(exec_match.group(1).strip())
+        server_dir = start_sh.parent
+        username   = user_match.group(1).strip()
+        description = desc_match.group(1).strip() if desc_match else unit_file.stem
+
+        # Asegurar permisos de ejecución en start.sh
+        if start_sh.exists():
+            start_sh.chmod(0o755)
+            ok(f"chmod +x {start_sh}")
+        else:
+            warn(f"start.sh no encontrado: {start_sh}")
+
+        # Asegurar que los directorios padre sean traversables
+        ensure_parents_traversable(server_dir)
+
+        # Ruta local del systemd dir de este proyecto
+        local_unit = SYSTEMD / unit_file.name
+
+        # Reescribir la unit con los parámetros corregidos
+        write_systemd_unit(local_unit, server_dir, start_sh, username, description)
+
+        # Copiar a /etc/systemd/system/
+        target = sys_dir / unit_file.name
+        try:
+            shutil.copy2(str(local_unit), str(target))
+            ok(f"Unit actualizada: {target}")
+            repaired += 1
+        except Exception as e:
+            warn(f"No se pudo copiar {unit_file.name}: {e}")
+
+    # Recargar systemd
+    try:
+        subprocess.check_call(["systemctl", "daemon-reload"],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        ok("systemctl daemon-reload ejecutado.")
+    except Exception as e:
+        warn(f"daemon-reload falló: {e}")
+
+    if repaired:
+        ok(f"{repaired} unit(s) reparada(s).")
+        info("Reinicia los servicios con:  sudo systemctl restart <nombre>.service")
+        # Preguntar si reiniciar ahora
+        try:
+            resp = input("  ¿Reiniciar los servicios ahora? [S/n]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            resp = "n"
+        if resp in ("", "s", "si", "sí", "y", "yes"):
+            for unit_file in unique:
+                try:
+                    subprocess.check_call(["systemctl", "restart", unit_file.stem],
+                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    ok(f"Reiniciado: {unit_file.stem}")
+                except Exception as e:
+                    warn(f"No se pudo reiniciar {unit_file.stem}: {e}")
+    return 0
+
 
 def write_screen_launcher(dest: Path, servers: list[tuple[str, Path]]) -> None:
     lines = ["#!/usr/bin/env bash", "# ── Screen Launcher ──", ""]
@@ -847,19 +1128,124 @@ def ask(prompt_text: str, default: str = "") -> str:
         print()
         raise SystemExit("\nAsistente cancelado.")
 
+def check_dependencies() -> None:
+    """Verifica e instala dependencias del sistema requeridas."""
+    # Verificar sistema operativo
+    if os.name != 'posix':
+        err("Este script solo funciona en sistemas Linux/Unix.")
+        sys.exit(1)
+    
+    required = [
+        ("curl", "curl", "Para descargas HTTP"),
+        ("unzip", "unzip", "Para descomprimir archivos Bedrock"),
+        ("screen", "screen", "Para gestión de sesiones (opcional pero recomendado)"),
+    ]
+    missing = []
+    for cmd, pkg, desc in required:
+        if not shutil.which(cmd):
+            missing.append((pkg, desc))
+    
+    # Verificar Java
+    java_ver, _ = detect_java()
+    if not java_ver:
+        missing.append(("openjdk-21-jre-headless", "Java 21 (requerido para servidores)"))
+    
+    if missing:
+        step("Instalando dependencias faltantes")
+        if is_root():
+            # Intentar instalar con apt, yum, pacman, etc.
+            managers = [
+                ("apt-get", ["apt-get", "update"], ["apt-get", "install", "-y"]),
+                ("yum", [], ["yum", "install", "-y"]),
+                ("dnf", [], ["dnf", "install", "-y"]),
+                ("pacman", [], ["pacman", "-S", "--noconfirm"]),
+                ("zypper", [], ["zypper", "install", "-y"]),
+            ]
+            installed = False
+            for mgr, update_cmd, install_cmd in managers:
+                if shutil.which(mgr):
+                    try:
+                        if update_cmd:
+                            subprocess.check_call(update_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        packages = [pkg for pkg, _ in missing]
+                        subprocess.check_call(install_cmd + packages, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        ok(f"Dependencias instaladas con {mgr}")
+                        installed = True
+                        break
+                    except Exception as e:
+                        warn(f"Falló instalación con {mgr}: {e}")
+            if not installed:
+                err("No se pudieron instalar dependencias automáticamente.")
+                for pkg, desc in missing:
+                    err(f"  Instala manualmente: {pkg} — {desc}")
+                sys.exit(1)
+        else:
+            err("Faltan dependencias y no eres root para instalarlas:")
+            for pkg, desc in missing:
+                err(f"  {pkg} — {desc}")
+            err("Ejecuta como root: sudo python3 <script>")
+            sys.exit(1)
+
+def get_key():
+    if not termios or not tty:
+        return input("Presiona una tecla: ").strip()
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        ch = sys.stdin.read(1)
+        if ch == '\x1b':
+            ch += sys.stdin.read(2)
+        return ch
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
 def ask_choice(prompt_text: str, choices: list[str], default: str = "") -> str:
-    opts = " / ".join(
-        f"{C.BOLD}{c}{C.RESET}" if c == default else c
-        for c in choices
-    ) if _color() else " / ".join(choices)
-    val = ask(f"{prompt_text} ({opts})", default).lower()
-    while val not in [c.lower() for c in choices]:
-        err(f"Elige entre: {', '.join(choices)}")
-        val = ask(f"{prompt_text} ({opts})", default).lower()
-    return val
+    current = choices.index(default) if default in choices else 0
+    n = len(choices)
+
+    hdr = f"  {C.CYAN}{C.BOLD}{prompt_text}{C.RESET}" if _color() else f"  {prompt_text}"
+    sys.stdout.write(hdr + "\n")
+    sys.stdout.flush()
+
+    def _render(cur: int) -> None:
+        for i, choice in enumerate(choices):
+            if _color():
+                line = (f"  {C.GREEN}>{C.RESET} {C.BOLD}{choice}{C.RESET}" if i == cur
+                        else f"    {C.DIM}{choice}{C.RESET}")
+            else:
+                line = f"  {'>' if i == cur else ' '} {choice}"
+            sys.stdout.write(line + "\033[K\n")
+        sys.stdout.flush()
+
+    _render(current)
+
+    while True:
+        key = get_key()
+        prev = current
+        if key == '\x1b[A':
+            current = max(0, current - 1)
+        elif key == '\x1b[B':
+            current = min(n - 1, current + 1)
+        elif key in ['\n', '\r']:
+            sys.stdout.write(f"\033[{n}A")
+            for _ in range(n):
+                sys.stdout.write("\033[2K\n")
+            sys.stdout.write(f"\033[{n}A")
+            res = (f"  {C.GREEN}\u2714{C.RESET}  {C.DIM}{prompt_text}:{C.RESET} {C.BOLD}{choices[current]}{C.RESET}"
+                   if _color() else f"  [\u2714]  {prompt_text}: {choices[current]}")
+            sys.stdout.write(res + "\033[K\n")
+            sys.stdout.flush()
+            return choices[current]
+        if current != prev:
+            sys.stdout.write(f"\033[{n}A")
+            sys.stdout.flush()
+            _render(current)
 
 def ask_yn(prompt_text: str, default: bool = True) -> bool:
-    return ask_choice(prompt_text, ["si", "no"], "si" if default else "no") == "si"
+    choices = ["Sí", "No"]
+    default_choice = "Sí" if default else "No"
+    return ask_choice(prompt_text, choices, default_choice) == "Sí"
 
 def ask_int(prompt_text: str, default: int, mn: int = 1, mx: int = 65535) -> int:
     while True:
@@ -1006,6 +1392,7 @@ def configure_network(port: int, protocol: str = "tcp") -> dict:
 # ═══════════════════════════════════════════════════════════════════
 def run_wizard() -> int:
     banner()
+    check_dependencies()
     title("Bienvenido al asistente de configuración v3.0")
     print("  Este asistente configura todo lo necesario para que tu servidor")
     print("  Minecraft quede corriendo en Linux de forma permanente.")
@@ -1074,7 +1461,6 @@ def run_wizard() -> int:
     if resume_state and "basic" in completed:
         server_name = resume_state.get("server_name", "Servidor")
         motd = resume_state.get("motd", f"§b{server_name} §7» §aOnline")
-        ok(f"Usando valores guardados: server_name={server_name}")
     else:
         server_name = ask("Nombre del servidor", "Servidor")
         motd        = ask("MOTD (mensaje en la lista)", f"§b{server_name} §7» §aOnline")
@@ -1093,7 +1479,6 @@ def run_wizard() -> int:
     print(f"  {C.CYAN}ambos{C.RESET}   → Ambas ediciones\n" if _color() else "  ambos   → Ambas ediciones\n")
     if resume_state and "server_type" in completed:
         server_type = resume_state.get("server_type", "java")
-        ok(f"Usando tipo guardado: {server_type}")
     else:
         server_type = ask_choice("Tipo", ["java", "bedrock", "ambos"], "java")
         state["data"]["server_type"] = server_type
@@ -1154,8 +1539,14 @@ def run_wizard() -> int:
             print()
 
             engine  = ask_choice("Motor", list(engines.keys()), "paper")
-            display_versions(engine)
-            version = ask("Versión (o 'latest')", "latest")
+            info("Consultando versiones disponibles...")
+            available = get_available_versions(engine)
+            if len(available) > 1:
+                version_choice = ask_choice(f"Versión de {engine}", available, available[0])
+                # Si la elección es 'latest (X.X.X)', extraer solo 'latest'
+                version = "latest" if version_choice.startswith("latest") else version_choice
+            else:
+                version = "latest"
 
             default_port = 25565 + i
             net = configure_network(default_port, "tcp")
@@ -1198,7 +1589,10 @@ def run_wizard() -> int:
             for i in range(n):
                 print(f"\n  {C.BOLD}── Instancia Bedrock #{i+1} ──{C.RESET}" if _color()
                       else f"\n  -- Bedrock #{i+1} --")
-                bver = ask("Versión Bedrock (o 'latest')", "latest")
+                info("Consultando versiones de Bedrock disponibles...")
+                available_bedrock = get_available_versions("bedrock")
+                bver_choice = ask_choice("Versión Bedrock", available_bedrock, available_bedrock[0])
+                bver = "latest" if bver_choice.startswith("latest") else bver_choice
                 net  = configure_network(19132 + i, "udp")
                 bedrock_instances.append({"version": bver, "net": net})
             state["data"]["bedrock_instances"] = bedrock_instances
@@ -1216,6 +1610,27 @@ def run_wizard() -> int:
             ok(f"Usando plugins/mods guardados: {', '.join(selected_plugins.keys())}")
         else:
             step("Plugins y Mods")
+
+            # ── Geyser + Floodgate: crossplay Java <-> Bedrock ──────────
+            if do_java:
+                step("Juego cruzado Java Edition ↔ Bedrock Edition")
+                print()
+                if _color():
+                    print(f"  {C.CYAN}Geyser{C.RESET} permite que jugadores de {C.BOLD}Bedrock{C.RESET} (móvil, consola, Windows 10)")
+                    print(f"  se conecten a tu servidor {C.BOLD}Java Edition{C.RESET} sin modificar el cliente.")
+                    print(f"  {C.CYAN}Floodgate{C.RESET} les permite entrar {C.BOLD}sin cuenta Java{C.RESET} (Xbox/PSN/cuenta Bedrock).")
+                else:
+                    print("  Geyser permite que jugadores Bedrock se conecten al servidor Java.")
+                    print("  Floodgate les permite entrar sin cuenta Java.")
+                print()
+                add_geyser = ask_yn("¿Instalar Geyser + Floodgate (crossplay Java ↔ Bedrock)?", do_bedrock)
+                if add_geyser:
+                    selected_plugins["Geyser-Spigot"] = PLUGINS["Geyser-Spigot"]
+                    selected_plugins["Floodgate"]     = PLUGINS["Floodgate"]
+                    ok("Geyser + Floodgate añadidos.")
+                    info("Los jugadores Bedrock se conectarán al mismo puerto que Java (25565 por defecto).")
+                    if not online_mode:
+                        info("Con online-mode=false y Floodgate, los jugadores Bedrock entran con su cuenta Xbox/PSN.")
 
             # Auto-agregar ViaVersion si online_mode es False (para que conecten varias versiones)
             multiversion = ask_yn("¿Permitir que se conecten jugadores de distintas versiones de Minecraft?", False)
@@ -1295,6 +1710,7 @@ def run_wizard() -> int:
     if resume_state and "persistence" in completed:
         persistence = resume_state.get("persistence", default_persist)
         system_user = resume_state.get("system_user", "minecraft")
+        systemd_opts = resume_state.get("systemd_opts", {})
         ok(f"Usando persistencia guardada: {persistence}")
     else:
         persistence = ask_choice("Modo", list(persist_opts.keys()), default_persist)
@@ -1303,8 +1719,13 @@ def run_wizard() -> int:
             system_user = ask("Usuario del sistema para el servicio", "minecraft")
             if not user_exists(system_user):
                 create_system_user(system_user)
+            advanced = ask_yn("¿Configurar opciones avanzadas del servicio systemd?", False)
+            systemd_opts = configure_systemd_options() if advanced else {}
+        else:
+            systemd_opts = {}
         state["data"]["persistence"] = persistence
         state["data"]["system_user"] = system_user
+        state["data"]["systemd_opts"] = systemd_opts
         if "persistence" not in state["completed"]:
             state["completed"].append("persistence")
         save_progress({"completed": state["completed"], "data": state["data"]})
@@ -1387,7 +1808,7 @@ def run_wizard() -> int:
         engine  = inst["engine"]
         version = inst["version"]
         net     = inst["net"]
-        label   = f"java-{engine}-{i}"
+        label   = f"{server_name}-{engine}-{i}"
         td      = SERVERS / label
         td.mkdir(parents=True, exist_ok=True)
 
@@ -1433,13 +1854,13 @@ def run_wizard() -> int:
         # Permisos
         if is_root() and persistence == "systemd":
             set_directory_permissions(td, system_user)
-
-        # systemd unit (only generate if user chose systemd persistence)
+            ensure_parents_traversable(td)
         if persistence == "systemd":
             unit_name = f"{label}.service"
             unit_path = SYSTEMD / unit_name
             write_systemd_unit(unit_path, td, td / "start.sh", system_user,
-                               description=f"{label}")
+                               description=f"{label}",
+                               opts=systemd_opts)
 
         # Docker
         if persistence == "docker":
@@ -1456,7 +1877,7 @@ def run_wizard() -> int:
     # ── INSTALAR BEDROCK ──────────────────────────────────────────
     for i, inst in enumerate(bedrock_instances, 1):
         net = inst["net"]
-        td  = SERVERS / f"bedrock-{inst['version']}-{i}"
+        td  = SERVERS / f"{server_name}-bedrock-{inst['version']}-{i}"
         td.mkdir(parents=True, exist_ok=True)
 
         step(f"Instalando Bedrock #{i}: {inst['version']}")
@@ -1470,17 +1891,19 @@ def run_wizard() -> int:
 
         if is_root() and persistence == "systemd":
             set_directory_permissions(td, system_user)
-            unit_name = f"bedrock-{i}.service"
+            ensure_parents_traversable(td)
+            unit_name = f"{server_name}-bedrock-{i}.service"
             unit_path = SYSTEMD / unit_name
             write_systemd_unit(unit_path, td, td / "start.sh", system_user,
-                               description=f"Bedrock #{i}")
+                               description=f"{server_name} Bedrock #{i}",
+                               opts=systemd_opts)
             systemd_units.append(unit_path)
 
         if persistence == "docker":
-            docker_services.append({"name": f"bedrock-{i}", "port": net["port"],
+            docker_services.append({"name": f"{server_name}-bedrock-{i}", "port": net["port"],
                                      "path": str(td), "proto": "udp"})
 
-        start_scripts.append((f"bedrock-{i}", td / "start.sh"))
+        start_scripts.append((f"{server_name}-bedrock-{i}", td / "start.sh"))
         installed_bedrock.append(td)
         ok(f"Bedrock #{i} listo en: {td}")
 
@@ -1494,6 +1917,7 @@ def run_wizard() -> int:
             cron_line = f"0 3 * * * root /usr/bin/python3 {ROOT}/<script> backup >> {LOGS}/backup.log 2>&1"
             cron_file = Path("/etc/cron.d/minecraft-backup")
             try:
+                cron_file.parent.mkdir(parents=True, exist_ok=True)
                 cron_file.write_text(cron_line + "\n")
                 ok(f"Cron diario instalado: {cron_file} (a las 3:00 AM)")
             except Exception as e:
@@ -1915,6 +2339,161 @@ def run_validate() -> int:
         err("RESULTADO FINAL: Hay errores — revísalos arriba.")
     return 0 if all_ok else 2
 
+def run_delete() -> int:
+    """Elimina un servidor instalado: para el servicio, borra archivos y actualiza config."""
+    if not is_root():
+        err("Necesitas ejecutar como root: sudo python3 auralix.py delete")
+        return 1
+
+    title("Eliminar servidor")
+
+    marker  = "# ── Generado por el instalador v3.0 ──"
+    sys_dir = Path("/etc/systemd/system")
+
+    # Detectar servidores instalados desde units generadas por el instalador
+    candidates: list[Path] = []
+    for d in (SYSTEMD, sys_dir):
+        if d.exists():
+            for f in d.glob("*.service"):
+                try:
+                    if marker in f.read_text(encoding="utf-8", errors="ignore"):
+                        candidates.append(f)
+                except Exception:
+                    pass
+
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for c in candidates:
+        if c.name not in seen:
+            seen.add(c.name)
+            unique.append(c)
+
+    # Además, detectar directorios en servers/ sin unit asociada
+    orphan_dirs: list[Path] = []
+    if SERVERS.exists():
+        known_stems = {u.stem for u in unique}
+        for d in sorted(SERVERS.iterdir()):
+            if d.is_dir() and d.name not in known_stems:
+                orphan_dirs.append(d)
+
+    if not unique and not orphan_dirs:
+        warn("No se encontraron servidores instalados.")
+        return 0
+
+    # Construir opciones para el menú
+    choices: list[str] = []
+    for u in unique:
+        content = u.read_text(encoding="utf-8", errors="ignore")
+        wdir    = re.search(r'^WorkingDirectory=(.+)$', content, re.MULTILINE)
+        label   = wdir.group(1).strip() if wdir else str(u.stem)
+        choices.append(f"{u.stem}  [{label}]")
+    for d in orphan_dirs:
+        choices.append(f"{d.name}  [sin servicio]")
+    choices.append("Cancelar")
+
+    sel = ask_choice("Servidor a eliminar", choices, choices[-1])
+    if sel == "Cancelar":
+        info("Operación cancelada.")
+        return 0
+
+    idx = choices.index(sel)
+
+    # Resolver qué tenemos: unit o solo directorio
+    is_unit   = idx < len(unique)
+    unit_file = unique[idx] if is_unit else None
+    server_dir: Path | None = None
+
+    if unit_file:
+        content   = unit_file.read_text(encoding="utf-8", errors="ignore")
+        wdir_m    = re.search(r'^WorkingDirectory=(.+)$', content, re.MULTILINE)
+        server_dir = Path(wdir_m.group(1).strip()) if wdir_m else None
+    else:
+        server_dir = orphan_dirs[idx - len(unique)]
+
+    # Confirmación
+    sep()
+    if unit_file:
+        warn(f"Se eliminará el servicio:  {unit_file.stem}")
+    if server_dir and server_dir.exists():
+        warn(f"Se borrará el directorio:  {server_dir}")
+    sep()
+    try:
+        confirm = input("  Escribe el nombre del servidor para confirmar: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        return 0
+    expected = unit_file.stem if unit_file else (server_dir.name if server_dir else "")
+    if confirm != expected:
+        err("Nombre incorrecto. Operación cancelada.")
+        return 1
+
+    # 1. Detener y deshabilitar el servicio
+    if unit_file:
+        stem = unit_file.stem
+        for cmd in ("stop", "disable"):
+            try:
+                subprocess.check_call(["systemctl", cmd, stem],
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                ok(f"systemctl {cmd} {stem}")
+            except Exception as e:
+                warn(f"systemctl {cmd} {stem}: {e}")
+
+        # 2. Eliminar unit de /etc/systemd/system/
+        sys_unit = sys_dir / unit_file.name
+        for p in (sys_unit, SYSTEMD / unit_file.name):
+            try:
+                if p.exists():
+                    p.unlink()
+                    ok(f"Eliminado: {p}")
+            except Exception as e:
+                warn(f"No se pudo borrar {p}: {e}")
+
+        try:
+            subprocess.check_call(["systemctl", "daemon-reload"],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            ok("daemon-reload ejecutado.")
+        except Exception as e:
+            warn(f"daemon-reload: {e}")
+
+    # 3. Borrar directorio del servidor
+    if server_dir and server_dir.exists():
+        try:
+            shutil.rmtree(server_dir)
+            ok(f"Directorio eliminado: {server_dir}")
+        except Exception as e:
+            err(f"No se pudo borrar {server_dir}: {e}")
+            return 1
+
+    # 4. Actualizar config.json
+    if CONFIG.exists() and unit_file:
+        try:
+            cfg = json.loads(CONFIG.read_text())
+            stem = unit_file.stem
+            server_name = cfg.get("server_name", "")
+            # Intentar remover la instancia Java correspondiente
+            ji = cfg.get("java_instances", [])
+            bi = cfg.get("bedrock_instances", [])
+            new_ji: list[dict] = []
+            for n, inst in enumerate(ji, 1):
+                label = f"{server_name}-{inst.get('engine','java')}-{n}"
+                if label != stem:
+                    new_ji.append(inst)
+            cfg["java_instances"] = new_ji
+            # Bedrock
+            new_bi: list[dict] = []
+            for n, inst in enumerate(bi, 1):
+                blabel = f"{server_name}-bedrock-{n}"
+                if blabel != stem:
+                    new_bi.append(inst)
+            cfg["bedrock_instances"] = new_bi
+            CONFIG.write_text(json.dumps(cfg, indent=4, ensure_ascii=False))
+            ok("config.json actualizado.")
+        except Exception as e:
+            warn(f"No se pudo actualizar config.json: {e}")
+
+    ok(f"Servidor '{expected}' eliminado correctamente.")
+    return 0
+
+
 # ═══════════════════════════════════════════════════════════════════
 #  MAIN
 # ═══════════════════════════════════════════════════════════════════
@@ -1942,6 +2521,8 @@ def main():
     sub.add_parser("logs",     help="Ver logs en tiempo real")
     sub.add_parser("validate", help="Verificar instalación")
     sub.add_parser("test",     help="Ejecutar tests unitarios")
+    sub.add_parser("repair",   help="Reparar units systemd generadas (permisos, ProtectHome)")
+    sub.add_parser("delete",   help="Eliminar un servidor instalado")
 
     args = p.parse_args()
 
@@ -1953,6 +2534,8 @@ def main():
         elif args.cmd == "backup": sys.exit(run_backup())
         elif args.cmd == "logs":   sys.exit(run_logs())
         elif args.cmd == "validate": sys.exit(run_validate())
+        elif args.cmd == "repair": sys.exit(repair_systemd_units())
+        elif args.cmd == "delete": sys.exit(run_delete())
         elif args.cmd == "test":
             sys.exit(subprocess.call(
                 [sys.executable, "-m", "unittest", "discover", "-s", str(TESTS)]

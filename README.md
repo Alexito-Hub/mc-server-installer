@@ -1,72 +1,57 @@
-Minecraft — Proyecto inicial
+# pitufialdea — Servidor Minecraft
 
-Este proyecto automatiza la descarga y la configuración inicial de un servidor Minecraft profesional.
+Gestionado por **auralix.py** — instalador v3.0.
 
-Características:
-- Selección entre `paper` (PaperMC) y `vanilla` (Mojang)
-- Selección de versión y descarga automática del jar correspondiente
-- Genera `eula.txt`, `server.properties` y scripts de arranque multiplataforma
-- Buenas prácticas y ejemplos de despliegue profesional en `docs/professional.md`
+## Conexión
 
+| Tipo    | IP              | Puerto    |
+|---------|-----------------|-----------|
+| Java    | 38.250.153.21   | 25565 TCP |
+| Bedrock | 38.250.153.21   | 19132 UDP |
 
-Requisitos:
-- `python3` (>=3.8) para ejecutar `installer.py` (sin dependencias externas)
-- `java` para ejecutar el servidor (configurable en `start.sh` / `start.ps1`)
+> `online-mode=false` — jugadores sin cuenta premium pueden conectarse.
 
-Uso rápido (Python):
-1. Ejecuta desde la carpeta `minecraft`:
+## Comandos
 
 ```bash
-python -m pip --version || true
-python installer.py       # interactivo
-# o modo no interactivo:
-python installer.py -e paper -v latest --staging
+sudo python3 auralix.py             # Asistente de instalación / reconfiguración
+sudo python3 auralix.py start       # Iniciar todos los servidores
+sudo python3 auralix.py stop        # Detener todos los servidores
+sudo python3 auralix.py status      # Estado de los servicios
+sudo python3 auralix.py backup      # Crear backup
+sudo python3 auralix.py logs        # Ver logs en tiempo real
+sudo python3 auralix.py validate    # Verificar instalación
+sudo python3 auralix.py repair      # Reparar units systemd (permisos)
+sudo python3 auralix.py delete      # Eliminar un servidor instalado
 ```
 
-2. Usa `./start.sh` (Linux/macOS) o `start.ps1` (Windows) para iniciar.
+## Estructura
 
-Funciones avanzadas añadidas:
-
-- Verificación de integridad (SHA) automática cuando la API proporciona el checksum.
- - Modo `staging`: añade `staging/` y genera `start-staging.sh` para pruebas. Habilítalo con `"staging": true` en la configuración o `python installer.py --staging`.
-- Scripts de backup: `backup.sh` y `backup.ps1` guardan comprimidos en `backups/`.
-- Dockerfile incluido para ejecutar el servidor en contenedor. Construcción:
-
-```bash
-docker build -t minecraft-server .
-docker run -v $(pwd)/world:/opt/minecraft/world -p 25565:25565 minecraft-server
+```
+servers/
+  <nombre>-<motor>-<n>/
+    server.jar · start.sh · eula.txt · server.properties
+    plugins/   · logs/
+  <nombre>-bedrock-<version>-<n>/
+    bedrock_server · start.sh
+backups/        backups automáticos
+systemd/        units de systemd locales
+logs/           logs centralizados
+config.json     configuración activa
 ```
 
-Ejemplo de archivo de configuración:
+## Motores soportados
 
-Para usar el sistema como único ejecutador, usa `installer.py` (ubicado en la raíz del proyecto).
+| Motor   | Tipo    | Notas                          |
+|---------|---------|--------------------------------|
+| Paper   | Java    | Recomendado, alto rendimiento  |
+| Purpur  | Java    | Fork de Paper con más opciones  |
+| Vanilla | Java    | Oficial de Mojang              |
+| Spigot  | Java    | Compatible con Bukkit          |
+| Fabric  | Java    | Para mods                      |
+| Bedrock | Bedrock | Compatible con móvil/consola   |
 
-Ejemplos:
+## Crossplay Java ↔ Bedrock
 
-```bash
-# Validar todos los archivos y su sintaxis
-python installer.py validate
-
-# Ejecutar instalador integrado
-python installer.py install -e paper -v latest --staging
-
-# Iniciar servidor (usa el script en `bin/` si lo prefieres)
-python installer.py start
-
-# Crear backup (o ejecutar directamente `bin/backup.sh`)
-python installer.py backup
-
-# Ejecutar tests unitarios
-python installer.py test
-```
-
-Tests unitarios:
-
-Para ejecutar los tests (usa Python >=3.8):
-
-```bash
-python -m unittest discover -s tests
-```
-
-Validaciones añadidas:
-- `installer.py` ahora valida versiones simples, comprueba disponibilidad de `java` y ofrece mensajes claros para Spigot/Forge/Fabric cuando la descarga automática no es factible.
+Instala **Geyser + Floodgate** desde el asistente para permitir
+que jugadores Bedrock se conecten al servidor Java.
