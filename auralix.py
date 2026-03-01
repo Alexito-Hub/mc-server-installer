@@ -346,7 +346,140 @@ def ensure_parents_traversable(server_dir: Path) -> None:
         except Exception as e:
             warn(f"No se pudo ajustar permisos en {current}: {e}")
 
+# ═══════════════════════════════════════════════════════════════════
+#  GOOGLE COMPUTE ENGINE
+# ═══════════════════════════════════════════════════════════════════
+_GCE_META = "http://metadata.google.internal/computeMetadata/v1"
+_GCE_HDR  = {"Metadata-Flavor": "Google", "User-Agent": "Installer/3.0"}
+
+def detect_gce() -> bool:
+    try:
+        req = Request(f"{_GCE_META}/instance/id", headers=_GCE_HDR)
+        with urlopen(req, timeout=2):
+            return True
+    except Exception:
+        return False
+
+def get_gce_metadata() -> dict:
+    """Devuelve project_id, instance, zone y network de la instancia GCE."""
+    result: dict = {}
+    fields = {
+        "project_id": "/project/project-id",
+        "instance":   "/instance/name",
+        "zone":       "/instance/zone",
+        "network":    "/instance/network-interfaces/0/network",
+        "ext_ip":     "/instance/network-interfaces/0/access-configs/0/externalIp",
+    }
+    for key, path in fields.items():
+        try:
+            req = Request(f"{_GCE_META}{path}", headers=_GCE_HDR)
+            with urlopen(req, timeout=3) as r:
+                val = r.read().decode().strip()
+                if key == "zone":
+                    val = val.split("/")[-1]
+                if key == "network":
+                    val = val.split("/")[-1]
+                result[key] = val
+        except Exception:
+            result[key] = ""
+    return result
+
+def gce_open_firewall(port: int, protocol: str, project: str = "") -> None:
+    """Abre regla de firewall en la VPC de GCE.
+    Usa gcloud CLI si está disponible; si no, muestra las instrucciones para el navegador."""
+    rule_name = f"mc-{protocol}-{port}"
+    project_flag = ["--project", project] if project else []
+
+    if shutil.which("gcloud"):
+        # Comprobar si la regla ya existe
+        check = subprocess.run(
+            ["gcloud", "compute", "firewall-rules", "describe", rule_name,
+             "--format=value(name)"] + project_flag,
+            capture_output=True, text=True
+        )
+        if check.returncode == 0:
+            ok(f"Regla GCE '{rule_name}' ya existe.")
+            return
+        try:
+            subprocess.check_call(
+                ["gcloud", "compute", "firewall-rules", "create", rule_name,
+                 f"--allow={protocol}:{port}",
+                 "--source-ranges=0.0.0.0/0",
+                 f"--description=Minecraft {protocol.upper()} {port}",
+                 "--format=none"] + project_flag
+            )
+            ok(f"Regla GCE creada: {rule_name}  ({protocol.upper()} {port})")
+        except Exception as e:
+            warn(f"No se pudo crear la regla con gcloud: {e}")
+            _gce_browser_instructions(port, protocol, project, rule_name)
+    else:
+        warn("'gcloud' CLI no encontrado.")
+        _gce_browser_instructions(port, protocol, project, rule_name)
+
+def _gce_browser_instructions(port: int, protocol: str, project: str, rule_name: str) -> None:
+    sep()
+    info("Abre esta URL en tu navegador y crea la regla de firewall:")
+    proj = project or "TU_PROYECTO"
+    console_url = (
+        f"https://console.cloud.google.com/networking/firewalls/add?project={proj}"
+    )
+    print(f"  {C.CYAN}{console_url}{C.RESET}" if _color() else f"  {console_url}")
+    print()
+    info(f"  Nombre:          {rule_name}")
+    info(f"  Tráfico:         Entrada (Ingress)")
+    info(f"  Protocolo/Port:  {protocol.upper()} : {port}")
+    info(f"  Rangos de IP:    0.0.0.0/0")
+    info(f"  Destinos:        Todas las instancias")
+    sep()
+    info("O con gcloud después de instalarlo (https://cloud.google.com/sdk):")
+    proj_flag = f" --project {project}" if project else ""
+    print(f"  gcloud compute firewall-rules create {rule_name} \\")
+    print(f"    --allow={protocol}:{port} --source-ranges=0.0.0.0/0{proj_flag}")
+    sep()
+
+def run_gce_setup() -> int:
+    """Asistente dedicado para configurar el firewall de GCE."""
+    title("Google Compute Engine — Configuración de firewall")
+    if detect_gce():
+        meta = get_gce_metadata()
+        ok(f"Instancia GCE detectada: {meta.get('instance','?')}")
+        ok(f"Proyecto:  {meta.get('project_id','?')}")
+        ok(f"Zona:      {meta.get('zone','?')}")
+        ok(f"Red:       {meta.get('network','?')}")
+        project = meta.get("project_id", "")
+    else:
+        warn("No se detectó metadata de GCE. Puede que no estés en una instancia GCE.")
+        project = ask("ID de proyecto GCE (vacío para omitir)", "")
+
+    sep()
+    cfg = load_config()
+    ports: list[tuple[int,str]] = []
+    for inst in cfg.get("java_instances", []):
+        ports.append((inst.get("port", 25565), "tcp"))
+    for inst in cfg.get("bedrock_instances", []):
+        ports.append((inst.get("port", 19132), "udp"))
+    if not ports:
+        ports = [(25565, "tcp"), (19132, "udp")]
+        warn("No se encontró config.json. Usando puertos por defecto: 25565/tcp y 19132/udp.")
+
+    for port, proto in ports:
+        info(f"Abriendo puerto {port}/{proto.upper()} en GCE...")
+        gce_open_firewall(port, proto, project)
+
+    sep()
+    ok("Configuración de firewall GCE completada.")
+    if not shutil.which("gcloud"):
+        info("Instala gcloud CLI para gestionar el firewall desde el terminal:")
+        info("  https://cloud.google.com/sdk/docs/install")
+    return 0
+
+
 def open_firewall_port(port: int, protocol: str = "tcp") -> None:
+    if detect_gce():
+        meta = get_gce_metadata()
+        info(f"Entorno GCE detectado — configurando regla VPC para {port}/{protocol.upper()}...")
+        gce_open_firewall(port, protocol, meta.get("project_id", ""))
+        return
     if shutil.which("ufw"):
         try:
             subprocess.check_call(["ufw", "allow", f"{port}/{protocol}"],
@@ -1305,10 +1438,17 @@ def configure_network(port: int, protocol: str = "tcp") -> dict:
     """Detecta IPs y configura dominio/IP del servidor."""
     step("Configuración de red e IP")
 
-    public_ip = get_public_ip()
+    on_gce    = detect_gce()
+    gce_meta  = get_gce_metadata() if on_gce else {}
+    public_ip = gce_meta.get("ext_ip") or get_public_ip()
     local_ip  = get_local_ip()
+
     ok(f"IP pública detectada:  {C.WHITE}{public_ip}{C.RESET}" if _color() else f"IP pública: {public_ip}")
     ok(f"IP local detectada:    {C.WHITE}{local_ip}{C.RESET}"  if _color() else f"IP local:   {local_ip}")
+
+    if on_gce:
+        ok(f"Entorno GCE: {gce_meta.get('instance','?')}  /  proyecto: {gce_meta.get('project_id','?')}")
+        warn("GCE: el firewall del SO no es suficiente — también se configurará la regla VPC.")
     sep()
 
     print()
@@ -2523,6 +2663,7 @@ def main():
     sub.add_parser("test",     help="Ejecutar tests unitarios")
     sub.add_parser("repair",   help="Reparar units systemd generadas (permisos, ProtectHome)")
     sub.add_parser("delete",   help="Eliminar un servidor instalado")
+    sub.add_parser("gce",      help="Configurar firewall de Google Compute Engine (VPC)")
 
     args = p.parse_args()
 
@@ -2536,6 +2677,7 @@ def main():
         elif args.cmd == "validate": sys.exit(run_validate())
         elif args.cmd == "repair": sys.exit(repair_systemd_units())
         elif args.cmd == "delete": sys.exit(run_delete())
+        elif args.cmd == "gce":    sys.exit(run_gce_setup())
         elif args.cmd == "test":
             sys.exit(subprocess.call(
                 [sys.executable, "-m", "unittest", "discover", "-s", str(TESTS)]
